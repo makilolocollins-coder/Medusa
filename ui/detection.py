@@ -5,7 +5,7 @@ from ai.mammosense import (
     load_model,
     predict,
 )
-
+st.success("MEDUSA BUILD: V2-2026-08-19")
 
 def show_detection():
 
