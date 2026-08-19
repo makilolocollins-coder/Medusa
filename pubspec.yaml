@@ -1,0 +1,36 @@
+name: medusa
+description: Medusa AI healthcare detection and marketplace platform.
+publish_to: "none"
+
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+
+  # UI and icons
+  google_fonts: ^6.2.1
+
+  # Image selection - AI integration later
+  image_picker: ^1.1.2
+
+  # Network/API - AI backend later
+  http: ^1.2.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/images/
+    - assets/icons/
