@@ -1,10 +1,5 @@
-# ============================================================
-# MEDUSA AI
-# MammoSense V2 Breast Ultrasound Model
-# Streamlit + Hugging Face
-# ============================================================
-
 import json
+import re
 
 import streamlit as st
 import torch
@@ -17,7 +12,7 @@ from huggingface_hub import hf_hub_download
 
 
 # ============================================================
-# CONFIGURATION
+# MEDUSA / MAMMOSENSE V2
 # ============================================================
 
 HF_REPO = "Makky07/MammoSense-breast-ultrasound"
@@ -41,7 +36,6 @@ DEFAULT_CLASSES = [
 def torch_load_safe(path):
 
     try:
-
         return torch.load(
             path,
             map_location="cpu",
@@ -49,7 +43,6 @@ def torch_load_safe(path):
         )
 
     except TypeError:
-
         return torch.load(
             path,
             map_location="cpu",
@@ -57,31 +50,24 @@ def torch_load_safe(path):
 
 
 # ============================================================
-# LOAD CONFIGURATION
+# CONFIG
 # ============================================================
 
 @st.cache_data(show_spinner=False)
 def load_config():
 
-    config_path = hf_hub_download(
+    path = hf_hub_download(
         repo_id=HF_REPO,
         filename=CONFIG_FILE,
         repo_type="model",
     )
 
-    with open(
-        config_path,
-        "r",
-        encoding="utf-8",
-    ) as file:
-
-        config = json.load(file)
-
-    return config
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
 # ============================================================
-# DOWNLOAD CHECKPOINT
+# MODEL DOWNLOAD
 # ============================================================
 
 @st.cache_data(show_spinner=False)
@@ -95,21 +81,14 @@ def download_checkpoint():
 
 
 # ============================================================
-# MAMMOSENSE V2 ARCHITECTURE
+# MAMMOSENSE V2
 # ============================================================
 
 class MammoSenseV2(nn.Module):
 
-    def __init__(
-        self,
-        head_dimensions,
-    ):
+    def __init__(self, head_dimensions):
 
         super().__init__()
-
-        # ----------------------------------------------------
-        # ViT-Small backbone
-        # ----------------------------------------------------
 
         self.backbone = timm.create_model(
             "vit_small_patch16_224",
@@ -119,21 +98,11 @@ class MammoSenseV2(nn.Module):
 
         feature_dim = self.backbone.num_features
 
-        # ----------------------------------------------------
-        # Custom classification head
-        #
-        # head.0
-        # head.3
-        # head.6
-        # ----------------------------------------------------
-
         layers = []
 
         in_features = feature_dim
 
-        for index, out_features in enumerate(
-            head_dimensions
-        ):
+        for i, out_features in enumerate(head_dimensions):
 
             layers.append(
                 nn.Linear(
@@ -142,25 +111,17 @@ class MammoSenseV2(nn.Module):
                 )
             )
 
-            # Hidden layers
+            if i < len(head_dimensions) - 1:
 
-            if index < len(head_dimensions) - 1:
-
-                layers.append(
-                    nn.ReLU()
-                )
+                layers.append(nn.ReLU())
 
                 layers.append(
-                    nn.Dropout(
-                        p=0.0
-                    )
+                    nn.Dropout(p=0.0)
                 )
 
             in_features = out_features
 
-        self.head = nn.Sequential(
-            *layers
-        )
+        self.head = nn.Sequential(*layers)
 
     def forward(self, x):
 
@@ -170,141 +131,33 @@ class MammoSenseV2(nn.Module):
 
 
 # ============================================================
-# FIND CLASSIFIER DIMENSIONS
-# ============================================================
-
-def infer_head_dimensions(state_dict):
-
-    head_layers = []
-
-    for key, tensor in state_dict.items():
-
-        if not key.startswith("head."):
-            continue
-
-        if not key.endswith(".weight"):
-            continue
-
-        if not torch.is_tensor(tensor):
-            continue
-
-        if tensor.ndim != 2:
-            continue
-
-        try:
-
-            layer_number = int(
-                key.split(".")[1]
-            )
-
-        except (IndexError, ValueError):
-
-            continue
-
-        out_features = tensor.shape[0]
-        in_features = tensor.shape[1]
-
-        head_layers.append(
-            (
-                layer_number,
-                in_features,
-                out_features,
-            )
-        )
-
-    head_layers.sort(
-        key=lambda x: x[0]
-    )
-
-    if not head_layers:
-
-        raise RuntimeError(
-            "No classification layers were found "
-            "in the MammoSense checkpoint."
-        )
-
-    dimensions = []
-
-    previous_output = None
-
-    for (
-        layer_number,
-        in_features,
-        out_features,
-    ) in head_layers:
-
-        if previous_output is not None:
-
-            if in_features != previous_output:
-
-                raise RuntimeError(
-                    "MammoSense classifier dimensions "
-                    "are inconsistent.\n\n"
-                    f"Layer: head.{layer_number}\n"
-                    f"Expected input: {previous_output}\n"
-                    f"Actual input: {in_features}"
-                )
-
-        dimensions.append(
-            out_features
-        )
-
-        previous_output = out_features
-
-    return dimensions
-
-
-# ============================================================
-# EXTRACT STATE DICTIONARY
+# EXTRACT CHECKPOINT
 # ============================================================
 
 def extract_state_dict(checkpoint):
-
-    # --------------------------------------------------------
-    # Standard training checkpoint
-    # --------------------------------------------------------
 
     if (
         isinstance(checkpoint, dict)
         and "model_state_dict" in checkpoint
     ):
-
         return checkpoint["model_state_dict"]
-
-    # --------------------------------------------------------
-    # Alternative checkpoint
-    # --------------------------------------------------------
 
     if (
         isinstance(checkpoint, dict)
         and "state_dict" in checkpoint
     ):
-
         return checkpoint["state_dict"]
 
-    # --------------------------------------------------------
-    # Raw state dictionary
-    # --------------------------------------------------------
-
     if isinstance(checkpoint, dict):
-
-        tensor_values = [
-            value
-            for value in checkpoint.values()
-            if torch.is_tensor(value)
-        ]
-
-        if tensor_values:
-
-            return checkpoint
+        return checkpoint
 
     raise RuntimeError(
-        "MammoSense checkpoint format is not supported."
+        "Unsupported MammoSense checkpoint format."
     )
 
 
 # ============================================================
-# REMOVE MODULE PREFIX
+# CLEAN PREFIX
 # ============================================================
 
 def clean_state_dict(state_dict):
@@ -313,17 +166,88 @@ def clean_state_dict(state_dict):
 
     for key, value in state_dict.items():
 
-        new_key = key
+        if key.startswith("module."):
+            key = key[len("module."):]
 
-        if new_key.startswith("module."):
-
-            new_key = new_key[
-                len("module.") :
-            ]
-
-        cleaned[new_key] = value
+        cleaned[key] = value
 
     return cleaned
+
+
+# ============================================================
+# FIND HEAD DIMENSIONS
+# ============================================================
+
+def infer_head_dimensions(state_dict):
+
+    layers = []
+
+    pattern = re.compile(
+        r"^head\.(\d+)\.weight$"
+    )
+
+    for key, tensor in state_dict.items():
+
+        match = pattern.match(key)
+
+        if match is None:
+            continue
+
+        if not torch.is_tensor(tensor):
+            continue
+
+        if tensor.ndim != 2:
+            continue
+
+        layer_number = int(match.group(1))
+
+        layers.append(
+            (
+                layer_number,
+                tensor.shape[1],
+                tensor.shape[0],
+            )
+        )
+
+    layers.sort(
+        key=lambda x: x[0]
+    )
+
+    if not layers:
+
+        raise RuntimeError(
+            "No classifier layers found "
+            "in MammoSense checkpoint."
+        )
+
+    dimensions = []
+
+    previous_output = None
+
+    for (
+        layer_number,
+        input_features,
+        output_features,
+    ) in layers:
+
+        if (
+            previous_output is not None
+            and input_features != previous_output
+        ):
+
+            raise RuntimeError(
+                "MammoSense classifier dimensions "
+                "are inconsistent.\n\n"
+                f"Layer: head.{layer_number}\n"
+                f"Expected input: {previous_output}\n"
+                f"Actual input: {input_features}"
+            )
+
+        dimensions.append(output_features)
+
+        previous_output = output_features
+
+    return dimensions
 
 
 # ============================================================
@@ -335,10 +259,6 @@ def clean_state_dict(state_dict):
 )
 def load_model():
 
-    # --------------------------------------------------------
-    # Device
-    # --------------------------------------------------------
-
     device = torch.device(
         "cuda"
         if torch.cuda.is_available()
@@ -346,17 +266,17 @@ def load_model():
     )
 
     # --------------------------------------------------------
-    # Configuration
+    # CONFIG
     # --------------------------------------------------------
 
     config = load_config()
 
-    classes = config.get(
-        "classes",
-        DEFAULT_CLASSES,
+    classes = list(
+        config.get(
+            "classes",
+            DEFAULT_CLASSES,
+        )
     )
-
-    classes = list(classes)
 
     image_size = int(
         config.get(
@@ -371,7 +291,7 @@ def load_model():
     )
 
     # --------------------------------------------------------
-    # Download checkpoint
+    # DOWNLOAD
     # --------------------------------------------------------
 
     model_path = download_checkpoint()
@@ -381,7 +301,7 @@ def load_model():
     )
 
     # --------------------------------------------------------
-    # Extract state dictionary
+    # STATE DICT
     # --------------------------------------------------------
 
     state_dict = extract_state_dict(
@@ -393,111 +313,118 @@ def load_model():
     )
 
     # --------------------------------------------------------
-    # Check checkpoint structure
+    # CHECK STRUCTURE
     # --------------------------------------------------------
 
-    has_backbone = any(
-        key.startswith("backbone.")
-        for key in state_dict
-    )
+    backbone_keys = {
+        key: value
+        for key, value in state_dict.items()
+        if key.startswith("backbone.")
+    }
 
-    has_head = any(
-        key.startswith("head.")
-        for key in state_dict
-    )
+    head_keys = {
+        key: value
+        for key, value in state_dict.items()
+        if key.startswith("head.")
+    }
 
-    if not has_backbone:
+    if not backbone_keys:
 
         raise RuntimeError(
-            "MammoSense checkpoint does not contain "
-            "'backbone.*' weights."
+            "No backbone.* weights found."
         )
 
-    if not has_head:
+    if not head_keys:
 
         raise RuntimeError(
-            "MammoSense checkpoint does not contain "
-            "'head.*' weights."
+            "No head.* weights found."
         )
 
     # --------------------------------------------------------
-    # Infer classifier
+    # HEAD DIMENSIONS
     # --------------------------------------------------------
 
     head_dimensions = infer_head_dimensions(
         state_dict
     )
 
-    # --------------------------------------------------------
-    # Verify number of classes
-    # --------------------------------------------------------
-
     if head_dimensions[-1] != len(classes):
 
         raise RuntimeError(
-            "MammoSense classifier output does not "
-            "match the configured classes.\n\n"
-            f"Classifier output: "
-            f"{head_dimensions[-1]}\n"
-            f"Classes: "
-            f"{len(classes)}"
+            "Classifier output does not match "
+            "the number of classes.\n\n"
+            f"Output: {head_dimensions[-1]}\n"
+            f"Classes: {len(classes)}"
         )
 
     # --------------------------------------------------------
-    # Create model
+    # CREATE MODEL
     # --------------------------------------------------------
 
     model = MammoSenseV2(
-        head_dimensions=head_dimensions
+        head_dimensions
     )
 
     # ========================================================
-    # IMPORTANT FIX
+    # IMPORTANT:
     #
-    # The checkpoint contains:
+    # CHECKPOINT:
     #
     # backbone.cls_token
     # backbone.pos_embed
-    # backbone.blocks...
+    # backbone.blocks.0...
     #
-    # But the ViT itself expects:
+    # ViT expects:
     #
     # cls_token
     # pos_embed
-    # blocks...
+    # blocks.0...
     #
-    # Therefore we strip "backbone." before loading
-    # the backbone.
+    # Therefore remove "backbone.".
     # ========================================================
 
     backbone_state = {}
 
+    for key, value in backbone_keys.items():
+
+        new_key = key[
+            len("backbone.") :
+        ]
+
+        backbone_state[
+            new_key
+        ] = value
+
+    # ========================================================
+    # HEAD:
+    #
+    # checkpoint:
+    #
+    # head.0.weight
+    # head.3.weight
+    # head.6.weight
+    #
+    # Sequential head expects:
+    #
+    # 0.weight
+    # 3.weight
+    # 6.weight
+    # ========================================================
+
     head_state = {}
 
-    for key, value in state_dict.items():
+    for key, value in head_keys.items():
 
-        if key.startswith("backbone."):
+        new_key = key[
+            len("head.") :
+        ]
 
-            new_key = key[
-                len("backbone.") :
-            ]
-
-            backbone_state[
-                new_key
-            ] = value
-
-        elif key.startswith("head."):
-
-            new_key = key[
-                len("head.") :
-            ]
-
-            head_state[
-                new_key
-            ] = value
+        head_state[
+            new_key
+        ] = value
 
     # --------------------------------------------------------
-    # Load backbone
+    # LOAD BACKBONE SEPARATELY
     # --------------------------------------------------------
 
     try:
@@ -510,14 +437,14 @@ def load_model():
     except RuntimeError as error:
 
         raise RuntimeError(
-            "MammoSense ViT backbone could not "
-            "be loaded.\n\n"
+            "MammoSense ViT backbone failed "
+            "to load.\n\n"
             f"Architecture: {architecture}\n\n"
-            f"Original error:\n{error}"
+            f"{error}"
         )
 
     # --------------------------------------------------------
-    # Load classification head
+    # LOAD HEAD SEPARATELY
     # --------------------------------------------------------
 
     try:
@@ -530,25 +457,23 @@ def load_model():
     except RuntimeError as error:
 
         raise RuntimeError(
-            "MammoSense classification head could "
-            "not be loaded.\n\n"
+            "MammoSense classification head "
+            "failed to load.\n\n"
             f"Head dimensions: {head_dimensions}\n\n"
-            f"Original error:\n{error}"
+            f"{error}"
         )
 
     # --------------------------------------------------------
-    # Move model to device
+    # DEVICE
     # --------------------------------------------------------
 
-    model = model.to(
-        device
-    )
+    model = model.to(device)
 
     model.eval()
 
-    # ========================================================
-    # IMAGE PREPROCESSING
-    # ========================================================
+    # --------------------------------------------------------
+    # PREPROCESSING
+    # --------------------------------------------------------
 
     transform = transforms.Compose(
         [
@@ -578,9 +503,9 @@ def load_model():
         ]
     )
 
-    # ========================================================
-    # RETURN MODEL PACKAGE
-    # ========================================================
+    # --------------------------------------------------------
+    # RETURN
+    # --------------------------------------------------------
 
     return {
 
@@ -641,51 +566,35 @@ def predict(image):
     device = package["device"]
 
     # --------------------------------------------------------
-    # Ensure PIL image
+    # IMAGE
     # --------------------------------------------------------
 
     if not isinstance(image, Image.Image):
 
-        image = Image.open(
-            image
-        )
+        image = Image.open(image)
 
-    image = image.convert(
-        "RGB"
-    )
+    image = image.convert("RGB")
 
     # --------------------------------------------------------
-    # Transform
+    # TRANSFORM
     # --------------------------------------------------------
 
-    tensor = transform(
-        image
-    )
+    tensor = transform(image)
 
-    tensor = tensor.unsqueeze(
-        0
-    )
+    tensor = tensor.unsqueeze(0)
 
-    tensor = tensor.to(
-        device
-    )
+    tensor = tensor.to(device)
 
     # --------------------------------------------------------
-    # Inference
+    # INFERENCE
     # --------------------------------------------------------
 
-    logits = model(
-        tensor
-    )
+    logits = model(tensor)
 
     probabilities = torch.softmax(
         logits,
         dim=1,
     )[0]
-
-    # --------------------------------------------------------
-    # Prediction
-    # --------------------------------------------------------
 
     predicted_index = int(
         torch.argmax(
@@ -704,26 +613,18 @@ def predict(image):
     )
 
     # --------------------------------------------------------
-    # Probability table
+    # ALL PROBABILITIES
     # --------------------------------------------------------
 
     probability_dict = {}
 
-    for index, class_name in enumerate(
-        classes
-    ):
+    for i, class_name in enumerate(classes):
 
         probability_dict[
             class_name
         ] = float(
-            probabilities[
-                index
-            ].item()
+            probabilities[i].item()
         )
-
-    # --------------------------------------------------------
-    # Return
-    # --------------------------------------------------------
 
     return {
 
@@ -735,44 +636,4 @@ def predict(image):
 
         "probabilities":
             probability_dict,
-    }
-
-
-# ============================================================
-# MODEL STATUS
-# ============================================================
-
-def get_model_info():
-
-    package = load_model()
-
-    return {
-
-        "architecture":
-            package["architecture"],
-
-        "classes":
-            package["classes"],
-
-        "image_size":
-            package["image_size"],
-
-        "head_dimensions":
-            package["head_dimensions"],
-
-        "test_accuracy":
-            package["test_accuracy"],
-
-        "test_macro_f1":
-            package["test_macro_f1"],
-
-        "malignant_sensitivity":
-            package[
-                "malignant_sensitivity"
-            ],
-
-        "malignant_specificity":
-            package[
-                "malignant_specificity"
-            ],
     }
