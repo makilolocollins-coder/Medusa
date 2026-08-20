@@ -1,7 +1,11 @@
 import streamlit as st
 
+from ui.background import set_background
+
 
 def show_profile():
+
+    set_background("profile.jpg")
 
     st.header("👤 Profile")
 
@@ -10,10 +14,9 @@ def show_profile():
         "application preferences."
     )
 
+    st.divider()
 
-    # ========================================================
-    # PROFILE
-    # ========================================================
+    st.subheader("Personal Information")
 
     name = st.text_input(
         "Name",
@@ -25,10 +28,7 @@ def show_profile():
         placeholder="Enter your email",
     )
 
-
-    # ========================================================
-    # PREFERENCES
-    # ========================================================
+    st.divider()
 
     st.subheader("Preferences")
 
@@ -37,30 +37,26 @@ def show_profile():
         value=True,
     )
 
-    save = st.button(
+    if st.button(
         "Save Profile",
         type="primary",
-    )
-
-
-    if save:
+    ):
 
         st.success(
             "Profile preferences saved."
         )
-
-
-    # ========================================================
-    # ACCOUNT
-    # ========================================================
 
     st.divider()
 
     st.subheader("Account")
 
     st.write(
-        f"Notifications: "
-        f"{'Enabled' if notifications else 'Disabled'}"
+        "Notifications: "
+        + (
+            "Enabled"
+            if notifications
+            else "Disabled"
+        )
     )
 
     st.caption(
