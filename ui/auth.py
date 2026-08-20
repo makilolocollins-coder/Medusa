@@ -12,7 +12,8 @@ def show_auth():
     st.subheader("Create your account")
 
     email = st.text_input(
-        "Email address"
+        "Email address",
+        placeholder="you@example.com",
     )
 
     password = st.text_input(
@@ -31,7 +32,13 @@ def show_auth():
             st.error(
                 "Enter your email and password."
             )
+            return
 
+        if len(password) < 6:
+
+            st.error(
+                "Password must be at least 6 characters."
+            )
             return
 
         try:
@@ -46,10 +53,11 @@ def show_auth():
             if response.user:
 
                 st.session_state.auth_email = email
-                st.session_state.verify_email = True
+                st.session_state.auth_step = "verify"
 
                 st.success(
-                    "Verification code sent to your email."
+                    "Account created. "
+                    "Check your email to verify your account."
                 )
 
                 st.rerun()
@@ -65,7 +73,7 @@ def show_verification():
 
     supabase = get_supabase()
 
-    st.title("Verify your email")
+    st.title("📧 Verify your email")
 
     email = st.session_state.get(
         "auth_email",
@@ -73,45 +81,87 @@ def show_verification():
     )
 
     st.write(
-        f"We sent a verification code to **{email}**."
+        f"We sent a verification email to **{email}**."
     )
 
-    code = st.text_input(
-        "Enter verification code",
-        max_chars=6,
+    st.info(
+        "Open the email and follow the verification "
+        "instructions."
     )
+
+    st.divider()
+
+    st.subheader("Already verified?")
 
     if st.button(
-        "Verify email",
+        "Continue",
         type="primary",
         use_container_width=True,
     ):
 
-        if len(code) != 6:
+        try:
+
+            user = supabase.auth.get_user()
+
+            if user and user.user:
+
+                st.session_state.authenticated = True
+                st.session_state.auth_step = (
+                    "authenticated"
+                )
+
+                st.rerun()
+
+            else:
+
+                st.warning(
+                    "Your email has not been verified yet."
+                )
+
+        except Exception as error:
 
             st.error(
-                "Enter the 6-digit code."
+                f"Could not check verification: {error}"
             )
 
-            return
+
+def show_login():
+
+    supabase = get_supabase()
+
+    st.title("Welcome back")
+
+    email = st.text_input(
+        "Email address",
+        key="login_email",
+    )
+
+    password = st.text_input(
+        "Password",
+        type="password",
+        key="login_password",
+    )
+
+    if st.button(
+        "Login",
+        type="primary",
+        use_container_width=True,
+    ):
 
         try:
 
-            response = supabase.auth.verify_otp(
+            response = supabase.auth.sign_in_with_password(
                 {
                     "email": email,
-                    "token": code,
-                    "type": "email",
+                    "password": password,
                 }
             )
 
             if response.user:
 
                 st.session_state.authenticated = True
-                st.session_state.verify_email = False
-
-                st.success(
-                    "Email verified successfully."
+                st.session_state.auth_step = (
+                    "authenticated"
                 )
 
                 st.rerun()
@@ -119,5 +169,6 @@ def show_verification():
         except Exception as error:
 
             st.error(
-                f"Invalid verification code: {error}"
+                "Login failed. Check your email "
+                "and password."
             )
