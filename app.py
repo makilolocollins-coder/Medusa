@@ -1,13 +1,11 @@
 import streamlit as st
-from pathlib import Path
-import base64
 
 from ui.styles import load_styles
 from ui.home import show_home
-from ui.detection import show_detection
 from ui.health import show_health
 from ui.marketplace import show_marketplace
 from ui.profile import show_profile
+from ui.detection import show_detection
 
 
 # ============================================================
@@ -20,49 +18,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
 )
-
-
-# ============================================================
-# BACKGROUND
-# ============================================================
-
-def set_background():
-
-    image_path = Path(__file__).parent / "background.jpg"
-
-    if not image_path.exists():
-        return
-
-    with open(image_path, "rb") as image:
-
-        encoded = base64.b64encode(
-            image.read()
-        ).decode()
-
-    st.markdown(
-        f"""
-        <style>
-
-        .stApp {{
-            background-image:
-                linear-gradient(
-                    rgba(247,248,250,0.88),
-                    rgba(247,248,250,0.94)
-                ),
-                url("data:image/jpeg;base64,{encoded}");
-
-            background-size: cover;
-            background-position: center;
-            background-attachment: fixed;
-        }}
-
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-set_background()
 
 
 # ============================================================
@@ -79,16 +34,27 @@ load_styles()
 if "page" not in st.session_state:
     st.session_state.page = "Home"
 
+if "history" not in st.session_state:
+    st.session_state.history = []
+
+if "prediction" not in st.session_state:
+    st.session_state.prediction = None
+
 
 # ============================================================
 # HEADER
 # ============================================================
 
-st.title("🧬 MEDUSA AI")
+top_left, top_right = st.columns([4, 1])
 
-st.caption(
-    "Intelligent Health Infrastructure"
-)
+with top_left:
+
+    st.title("🧬 MEDUSA AI")
+    st.caption("Intelligent Health Infrastructure")
+
+with top_right:
+
+    st.success("● AI ONLINE")
 
 
 # ============================================================
@@ -103,14 +69,20 @@ pages = [
     "Profile",
 ]
 
-selected = st.radio(
+selected_page = st.radio(
     "Navigation",
     pages,
+    index=pages.index(
+        st.session_state.page
+    ),
     horizontal=True,
     label_visibility="collapsed",
 )
 
-st.session_state.page = selected
+st.session_state.page = selected_page
+
+
+st.divider()
 
 
 # ============================================================
