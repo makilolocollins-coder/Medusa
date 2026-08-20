@@ -1,15 +1,6 @@
 # ============================================================
 # MEDUSA AI
 # MammoSense V2 Model Engine
-#
-# This file contains ONLY:
-#   - Hugging Face model download
-#   - MammoSense architecture
-#   - checkpoint loading
-#   - image preprocessing
-#   - prediction
-#
-# UI is intentionally kept separate.
 # ============================================================
 
 import json
@@ -44,17 +35,44 @@ DEFAULT_IMAGE_SIZE = 224
 
 
 # ============================================================
-# PYTORCH CHECKPOINT LOADER
+# DOWNLOAD
 # ============================================================
 
-def _load_checkpoint(path):
+def download_file(filename):
+    return hf_hub_download(
+        repo_id=HF_REPO,
+        filename=filename,
+        repo_type="model",
+    )
 
-    """
-    PyTorch 2.6-compatible loader.
 
-    The checkpoint is from the user's own trusted
-    Hugging Face repository.
-    """
+# ============================================================
+# CONFIG
+# ============================================================
+
+def load_config():
+
+    try:
+        path = download_file(CONFIG_FILE)
+
+        with open(path, "r", encoding="utf-8") as f:
+            config = json.load(f)
+
+        return config
+
+    except Exception:
+        return {
+            "architecture": DEFAULT_ARCHITECTURE,
+            "classes": DEFAULT_CLASSES,
+            "image_size": DEFAULT_IMAGE_SIZE,
+        }
+
+
+# ============================================================
+# CHECKPOINT
+# ============================================================
+
+def load_checkpoint(path):
 
     try:
         return torch.load(
@@ -70,142 +88,133 @@ def _load_checkpoint(path):
         )
 
 
-# ============================================================
-# DOWNLOAD CONFIG
-# ============================================================
+def get_state_dict(checkpoint):
 
-def _download_config():
+    if "model_state_dict" in checkpoint:
+        state = checkpoint["model_state_dict"]
 
-    return hf_hub_download(
-        repo_id=HF_REPO,
-        filename=CONFIG_FILE,
-        repo_type="model",
-    )
+    elif "state_dict" in checkpoint:
+        state = checkpoint["state_dict"]
 
+    else:
+        state = checkpoint
 
-# ============================================================
-# DOWNLOAD MODEL
-# ============================================================
+    cleaned = {}
 
-def _download_model():
+    for key, value in state.items():
 
-    return hf_hub_download(
-        repo_id=HF_REPO,
-        filename=MODEL_FILE,
-        repo_type="model",
-    )
+        if key.startswith("module."):
+            key = key[7:]
+
+        cleaned[key] = value
+
+    return cleaned
 
 
 # ============================================================
-# READ CONFIG
+# DETERMINE CLASSIFIER STRUCTURE
 # ============================================================
 
-def _read_config():
+def get_head_dimensions(state_dict):
 
-    try:
+    layers = []
 
-        path = _download_config()
+    for key, tensor in state_dict.items():
 
-        with open(
-            path,
-            "r",
-            encoding="utf-8",
-        ) as file:
+        if (
+            key.startswith("head.")
+            and key.endswith(".weight")
+            and torch.is_tensor(tensor)
+            and tensor.ndim == 2
+        ):
 
-            return json.load(file)
+            number = int(key.split(".")[1])
 
-    except Exception:
+            layers.append(
+                (
+                    number,
+                    tensor.shape[1],
+                    tensor.shape[0],
+                )
+            )
 
-        return {
-            "architecture": DEFAULT_ARCHITECTURE,
-            "classes": DEFAULT_CLASSES,
-            "image_size": DEFAULT_IMAGE_SIZE,
-        }
+    layers.sort()
+
+    if not layers:
+        raise RuntimeError(
+            "No classification head was found "
+            "in the MammoSense checkpoint."
+        )
+
+    dimensions = []
+
+    previous_output = None
+
+    for _, input_features, output_features in layers:
+
+        if (
+            previous_output is not None
+            and input_features != previous_output
+        ):
+            raise RuntimeError(
+                "MammoSense classifier dimensions "
+                "are inconsistent."
+            )
+
+        dimensions.append(output_features)
+        previous_output = output_features
+
+    return dimensions
 
 
 # ============================================================
-# MAMMOSENSE V2
+# MODEL
 # ============================================================
 
 class MammoSenseV2(nn.Module):
 
-    """
-    Exact high-level structure of the checkpoint:
-
-        backbone.*
-        head.*
-
-    The backbone is:
-
-        timm ViT-Small Patch16 224
-
-    The classifier is reconstructed from
-    the checkpoint's head.* tensors.
-    """
-
-    def __init__(self, head_dimensions):
+    def __init__(
+        self,
+        architecture,
+        head_dimensions,
+    ):
 
         super().__init__()
 
-        # ----------------------------------------------------
-        # BACKBONE
-        # ----------------------------------------------------
-
         self.backbone = timm.create_model(
-            DEFAULT_ARCHITECTURE,
+            architecture,
             pretrained=False,
             num_classes=0,
         )
 
-        feature_dim = self.backbone.num_features
-
-        # ----------------------------------------------------
-        # CLASSIFICATION HEAD
-        # ----------------------------------------------------
+        input_features = self.backbone.num_features
 
         layers = []
 
-        in_features = feature_dim
-
-        for index, out_features in enumerate(
+        for i, output_features in enumerate(
             head_dimensions
         ):
 
             layers.append(
                 nn.Linear(
-                    in_features,
-                    out_features,
+                    input_features,
+                    output_features,
                 )
             )
 
-            # Every layer except the final
-            # classification layer is followed by:
-            #
-            # ReLU
-            # Dropout
-            #
-
-            if index < len(head_dimensions) - 1:
+            if i < len(head_dimensions) - 1:
 
                 layers.append(
                     nn.ReLU()
                 )
 
                 layers.append(
-                    nn.Dropout(
-                        p=0.0
-                    )
+                    nn.Dropout(0.0)
                 )
 
-            in_features = out_features
+            input_features = output_features
 
-        self.head = nn.Sequential(
-            *layers
-        )
-
-    # --------------------------------------------------------
-    # FORWARD
-    # --------------------------------------------------------
+        self.head = nn.Sequential(*layers)
 
     def forward(self, x):
 
@@ -215,225 +224,22 @@ class MammoSenseV2(nn.Module):
 
 
 # ============================================================
-# EXTRACT STATE DICTIONARY
-# ============================================================
-
-def _extract_state_dict(checkpoint):
-
-    if not isinstance(
-        checkpoint,
-        dict,
-    ):
-
-        raise RuntimeError(
-            "MammoSense checkpoint is not a dictionary."
-        )
-
-    # Common checkpoint format
-
-    if "model_state_dict" in checkpoint:
-
-        return checkpoint["model_state_dict"]
-
-    # Alternative format
-
-    if "state_dict" in checkpoint:
-
-        return checkpoint["state_dict"]
-
-    # Raw state dictionary
-
-    tensor_values = [
-        value
-        for value in checkpoint.values()
-        if torch.is_tensor(value)
-    ]
-
-    if tensor_values:
-
-        return checkpoint
-
-    raise RuntimeError(
-        "Could not find a model state dictionary "
-        "inside mammosense_v2.pt."
-    )
-
-
-# ============================================================
-# CLEAN STATE DICTIONARY
-# ============================================================
-
-def _clean_state_dict(state_dict):
-
-    cleaned = {}
-
-    for key, value in state_dict.items():
-
-        new_key = key
-
-        # Remove DataParallel prefix
-
-        if new_key.startswith("module."):
-
-            new_key = new_key[
-                len("module.") :
-            ]
-
-        cleaned[new_key] = value
-
-    return cleaned
-
-
-# ============================================================
-# FIND CLASSIFIER DIMENSIONS
-# ============================================================
-
-def _get_head_dimensions(state_dict):
-
-    """
-    Looks specifically for:
-
-        head.0.weight
-        head.3.weight
-        head.6.weight
-
-    The actual tensor shapes determine
-    the classifier architecture.
-    """
-
-    head_weights = []
-
-    for key, tensor in state_dict.items():
-
-        if not key.startswith("head."):
-
-            continue
-
-        if not key.endswith(".weight"):
-
-            continue
-
-        if not torch.is_tensor(tensor):
-
-            continue
-
-        if tensor.ndim != 2:
-
-            continue
-
-        layer_number = int(
-            key.split(".")[1]
-        )
-
-        head_weights.append(
-            (
-                layer_number,
-                tensor.shape[1],
-                tensor.shape[0],
-            )
-        )
-
-    head_weights.sort(
-        key=lambda item: item[0]
-    )
-
-    if not head_weights:
-
-        raise RuntimeError(
-            "No head.* Linear layers were found "
-            "in the MammoSense checkpoint."
-        )
-
-    dimensions = []
-
-    previous_output = None
-
-    for (
-        layer_number,
-        input_features,
-        output_features,
-    ) in head_weights:
-
-        if previous_output is not None:
-
-            if input_features != previous_output:
-
-                raise RuntimeError(
-                    "MammoSense classifier structure "
-                    "is inconsistent.\n\n"
-
-                    f"head.{layer_number}: "
-                    f"expected {previous_output} input features, "
-                    f"but checkpoint contains "
-                    f"{input_features}."
-                )
-
-        dimensions.append(
-            output_features
-        )
-
-        previous_output = output_features
-
-    return dimensions
-
-
-# ============================================================
-# VERIFY CHECKPOINT STRUCTURE
-# ============================================================
-
-def _verify_checkpoint(state_dict):
-
-    backbone_found = any(
-        key.startswith("backbone.")
-        for key in state_dict
-    )
-
-    head_found = any(
-        key.startswith("head.")
-        for key in state_dict
-    )
-
-    if not backbone_found:
-
-        raise RuntimeError(
-            "MammoSense checkpoint does not contain "
-            "'backbone.*' weights."
-        )
-
-    if not head_found:
-
-        raise RuntimeError(
-            "MammoSense checkpoint does not contain "
-            "'head.*' weights."
-        )
-
-
-# ============================================================
 # BUILD MODEL
 # ============================================================
 
-def _build_model(state_dict):
+def build_model(
+    state_dict,
+    architecture,
+):
 
-    head_dimensions = _get_head_dimensions(
+    head_dimensions = get_head_dimensions(
         state_dict
     )
 
     model = MammoSenseV2(
-        head_dimensions
+        architecture=architecture,
+        head_dimensions=head_dimensions,
     )
-
-    # --------------------------------------------------------
-    # IMPORTANT:
-    #
-    # The checkpoint already has:
-    #
-    # backbone.cls_token
-    # backbone.pos_embed
-    # backbone.patch_embed...
-    #
-    # therefore we load it into the complete
-    # MammoSenseV2 structure.
-    # --------------------------------------------------------
 
     try:
 
@@ -445,30 +251,25 @@ def _build_model(state_dict):
     except RuntimeError as error:
 
         raise RuntimeError(
-            "MammoSense checkpoint could not be "
-            "loaded into the reconstructed MammoSenseV2 "
-            "architecture.\n\n"
-            f"Detected head dimensions: "
-            f"{head_dimensions}\n\n"
-            f"PyTorch error:\n{error}"
+            "MammoSense checkpoint does not match "
+            "the reconstructed model.\n\n"
+            f"Head dimensions: {head_dimensions}\n\n"
+            f"{error}"
         )
 
-    return model, head_dimensions
+    return model
 
 
 # ============================================================
 # PREPROCESSING
 # ============================================================
 
-def _create_transform(image_size):
+def create_transform(image_size):
 
     return transforms.Compose(
         [
             transforms.Resize(
-                (
-                    image_size,
-                    image_size,
-                )
+                (image_size, image_size)
             ),
 
             transforms.ToTensor(),
@@ -479,7 +280,6 @@ def _create_transform(image_size):
                     0.456,
                     0.406,
                 ],
-
                 std=[
                     0.229,
                     0.224,
@@ -498,21 +298,13 @@ class MammoSense:
 
     def __init__(self):
 
-        # ----------------------------------------------------
-        # DEVICE
-        # ----------------------------------------------------
-
         self.device = torch.device(
             "cuda"
             if torch.cuda.is_available()
             else "cpu"
         )
 
-        # ----------------------------------------------------
-        # CONFIG
-        # ----------------------------------------------------
-
-        self.config = _read_config()
+        self.config = load_config()
 
         self.classes = self.config.get(
             "classes",
@@ -531,49 +323,22 @@ class MammoSense:
             )
         )
 
-        # ----------------------------------------------------
-        # DOWNLOAD
-        # ----------------------------------------------------
+        model_path = download_file(
+            MODEL_FILE
+        )
 
-        model_path = _download_model()
-
-        # ----------------------------------------------------
-        # LOAD CHECKPOINT
-        # ----------------------------------------------------
-
-        checkpoint = _load_checkpoint(
+        checkpoint = load_checkpoint(
             model_path
         )
 
-        state_dict = _extract_state_dict(
+        state_dict = get_state_dict(
             checkpoint
         )
 
-        state_dict = _clean_state_dict(
-            state_dict
+        self.model = build_model(
+            state_dict,
+            self.architecture,
         )
-
-        # ----------------------------------------------------
-        # VERIFY
-        # ----------------------------------------------------
-
-        _verify_checkpoint(
-            state_dict
-        )
-
-        # ----------------------------------------------------
-        # BUILD
-        # ----------------------------------------------------
-
-        self.model, self.head_dimensions = (
-            _build_model(
-                state_dict
-            )
-        )
-
-        # ----------------------------------------------------
-        # DEVICE
-        # ----------------------------------------------------
 
         self.model = self.model.to(
             self.device
@@ -581,154 +346,69 @@ class MammoSense:
 
         self.model.eval()
 
-        # ----------------------------------------------------
-        # TRANSFORM
-        # ----------------------------------------------------
-
-        self.transform = _create_transform(
+        self.transform = create_transform(
             self.image_size
         )
 
-        # ----------------------------------------------------
-        # METADATA
-        # ----------------------------------------------------
-
-        self.test_accuracy = self.config.get(
-            "test_accuracy"
-        )
-
-        self.test_macro_f1 = self.config.get(
-            "test_macro_f1"
-        )
-
-        self.malignant_sensitivity = (
-            self.config.get(
-                "malignant_sensitivity"
-            )
-        )
-
-        self.malignant_specificity = (
-            self.config.get(
-                "malignant_specificity"
-            )
-        )
-
-
-# ============================================================
-# PREDICTION
-# ============================================================
+    # --------------------------------------------------------
+    # PREDICTION
+    # --------------------------------------------------------
 
     @torch.inference_mode()
     def predict(self, image):
-
-        # ----------------------------------------------------
-        # PIL IMAGE
-        # ----------------------------------------------------
 
         if not isinstance(
             image,
             Image.Image,
         ):
-
             raise TypeError(
                 "MammoSense expects a PIL Image."
             )
 
-        image = image.convert(
-            "RGB"
-        )
+        image = image.convert("RGB")
 
-        # ----------------------------------------------------
-        # TRANSFORM
-        # ----------------------------------------------------
+        tensor = self.transform(image)
 
-        tensor = self.transform(
-            image
-        )
+        tensor = tensor.unsqueeze(0)
 
-        tensor = tensor.unsqueeze(
-            0
-        )
+        tensor = tensor.to(self.device)
 
-        tensor = tensor.to(
-            self.device
-        )
-
-        # ----------------------------------------------------
-        # MODEL
-        # ----------------------------------------------------
-
-        logits = self.model(
-            tensor
-        )
+        logits = self.model(tensor)
 
         probabilities = torch.softmax(
             logits,
             dim=1,
         )[0]
 
-        # ----------------------------------------------------
-        # PREDICTION
-        # ----------------------------------------------------
-
-        predicted_index = int(
-            torch.argmax(
-                probabilities
-            ).item()
+        index = int(
+            torch.argmax(probabilities)
         )
 
-        prediction = self.classes[
-            predicted_index
-        ]
+        prediction = self.classes[index]
 
         confidence = float(
-            probabilities[
-                predicted_index
-            ].item()
+            probabilities[index]
         )
 
-        # ----------------------------------------------------
-        # PROBABILITIES
-        # ----------------------------------------------------
-
-        probability_dict = {}
-
-        for index, class_name in enumerate(
-            self.classes
-        ):
-
-            probability_dict[
-                class_name
-            ] = float(
-                probabilities[
-                    index
-                ].item()
+        probability_dict = {
+            name: float(probabilities[i])
+            for i, name in enumerate(
+                self.classes
             )
-
-        # ----------------------------------------------------
-        # RESULT
-        # ----------------------------------------------------
+        }
 
         return {
-
             "prediction": prediction,
-
             "confidence": confidence,
-
             "probabilities": probability_dict,
-
             "architecture": self.architecture,
-
             "model": "MammoSense V2",
-
-            "device": str(
-                self.device
-            ),
+            "device": str(self.device),
         }
 
 
 # ============================================================
-# SINGLETON HELPER
+# SINGLETON
 # ============================================================
 
 _ENGINE = None
@@ -736,50 +416,9 @@ _ENGINE = None
 
 def get_mammosense():
 
-    """
-    Returns one MammoSense engine instance.
-
-    The UI can simply use:
-
-        engine = get_mammosense()
-        result = engine.predict(image)
-    """
-
     global _ENGINE
 
     if _ENGINE is None:
-
         _ENGINE = MammoSense()
 
     return _ENGINE
-
-# ============================================================
-# UI COMPATIBILITY FUNCTIONS
-# ============================================================
-
-def load_model():
-
-    """
-    Loads the MammoSense engine and returns
-    metadata required by the Streamlit UI.
-    """
-
-    engine = get_mammosense()
-
-    return {
-        "model_file": MODEL_FILE,
-        "architecture": engine.architecture,
-        "classes": engine.classes,
-        "device": str(engine.device),
-    }
-
-
-def predict(image):
-
-    """
-    Runs MammoSense prediction on a PIL image.
-    """
-
-    engine = get_mammosense()
-
-    return engine.predict(image)
