@@ -1,10 +1,11 @@
 import streamlit as st
+import textwrap
 
 
 def show_home():
 
     st.markdown(
-        """
+        textwrap.dedent("""
         <div class="hero">
 
             <h1>
@@ -19,12 +20,12 @@ def show_home():
             </p>
 
         </div>
-        """,
+        """),
         unsafe_allow_html=True,
     )
 
     st.markdown(
-        """
+        textwrap.dedent("""
         <div class="ai-card">
 
             <div class="ai-label">
@@ -41,7 +42,7 @@ def show_home():
             </div>
 
         </div>
-        """,
+        """),
         unsafe_allow_html=True,
     )
 
@@ -56,7 +57,9 @@ def show_home():
         st.rerun()
 
     st.markdown(
-        '<div class="section">AI Models</div>',
+        textwrap.dedent("""
+        <div class="section">AI Models</div>
+        """),
         unsafe_allow_html=True,
     )
 
@@ -64,7 +67,7 @@ def show_home():
 
     with a:
         st.markdown(
-            """
+            textwrap.dedent("""
             <div class="model-card">
 
                 <div class="model-icon">🧬</div>
@@ -79,13 +82,13 @@ def show_home():
                 </div>
 
             </div>
-            """,
+            """),
             unsafe_allow_html=True,
         )
 
     with b:
         st.markdown(
-            """
+            textwrap.dedent("""
             <div class="model-card">
 
                 <div class="model-icon">🧠</div>
@@ -100,13 +103,13 @@ def show_home():
                 </div>
 
             </div>
-            """,
+            """),
             unsafe_allow_html=True,
         )
 
     with c:
         st.markdown(
-            """
+            textwrap.dedent("""
             <div class="model-card">
 
                 <div class="model-icon">✦</div>
@@ -121,6 +124,6 @@ def show_home():
                 </div>
 
             </div>
-            """,
+            """),
             unsafe_allow_html=True,
         )
