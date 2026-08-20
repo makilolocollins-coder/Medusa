@@ -1,167 +1,201 @@
 import streamlit as st
 from PIL import Image
 
-from ai.lungcancer import load_model, predict
+from ui.background import set_background
+from ai.mammosense import load_model, predict
 
 
 def show_detection():
 
+    # ========================================================
+    # BACKGROUND
+    # ========================================================
+
+    set_background("detection.jpg")
+
+    # ========================================================
+    # HEADER
+    # ========================================================
+
     st.title("AI Detection")
 
     st.write(
-        "Upload a medical image and select "
-        "the AI model you want to test."
-    )
-
-    # ========================================================
-    # MODEL SELECTOR
-    # ========================================================
-
-    model = st.selectbox(
-        "Select AI Model",
-        [
-            "MammoSense",
-            "Lung AI",
-        ],
+        "Upload a breast ultrasound image "
+        "and let MammoSense analyse it."
     )
 
     st.divider()
 
     # ========================================================
-    # LUNG AI TEST
+    # LOAD MAMMOSENSE
     # ========================================================
 
-    if model == "Lung AI":
+    try:
 
-        st.header("🫁 Lung AI")
-
-        st.write(
-            "Upload a chest X-ray for AI-assisted "
-            "lung cancer and tuberculosis analysis."
-        )
-
-        uploaded = st.file_uploader(
-            "Upload chest X-ray",
-            type=[
-                "jpg",
-                "jpeg",
-                "png",
-            ],
-            key="lung_upload",
-        )
-
-        if uploaded is None:
-
-            st.info(
-                "Upload a chest X-ray to begin."
-            )
-
-            return
-
-        image = Image.open(
-            uploaded
-        )
-
-        st.image(
-            image,
-            caption="Uploaded chest X-ray",
-            use_container_width=True,
-        )
-
-        st.divider()
-
-        if st.button(
-            "Analyse X-ray",
-            type="primary",
-            use_container_width=True,
+        with st.spinner(
+            "Loading MammoSense AI..."
         ):
 
-            try:
+            package = load_model()
 
-                with st.spinner(
-                    "Loading Lung AI..."
-                ):
-
-                    load_model()
-
-                with st.spinner(
-                    "Analysing X-ray..."
-                ):
-
-                    result = predict(
-                        image
-                    )
-
-                st.success(
-                    "Analysis complete."
-                )
-
-                # ------------------------------------------------
-                # RESULTS
-                # ------------------------------------------------
-
-                st.subheader(
-                    "AI Results"
-                )
-
-                col1, col2 = st.columns(2)
-
-                with col1:
-
-                    st.metric(
-                        "Lung Cancer",
-                        f"{result['lung_cancer'] * 100:.2f}%",
-                    )
-
-                with col2:
-
-                    st.metric(
-                        "Tuberculosis",
-                        f"{result['tuberculosis'] * 100:.2f}%",
-                    )
-
-                st.subheader(
-                    "Finding"
-                )
-
-                for finding in result[
-                    "findings"
-                ]:
-
-                    st.info(
-                        finding
-                    )
-
-                st.caption(
-                    f"Model: {result['model']}"
-                )
-
-                st.caption(
-                    f"Architecture: "
-                    f"{result['architecture']}"
-                )
-
-            except Exception as error:
-
-                st.error(
-                    "Lung AI could not run."
-                )
-
-                st.exception(
-                    error
-                )
-
-    # ========================================================
-    # MAMMOSENSE
-    # ========================================================
-
-    else:
-
-        st.header(
-            "🩺 MammoSense"
+        st.success(
+            "MammoSense AI is ready."
         )
+
+    except Exception as error:
+
+        st.error(
+            "MammoSense could not be loaded."
+        )
+
+        st.exception(error)
+
+        return
+
+    # ========================================================
+    # MODEL INFORMATION
+    # ========================================================
+
+    with st.expander(
+        "Model information"
+    ):
+
+        st.write(
+            f"**Model:** "
+            f"{package['model_file']}"
+        )
+
+        st.write(
+            f"**Architecture:** "
+            f"{package['architecture']}"
+        )
+
+        st.write(
+            f"**Classes:** "
+            f"{', '.join(package['classes'])}"
+        )
+
+        st.write(
+            f"**Device:** "
+            f"{package['device']}"
+        )
+
+    # ========================================================
+    # UPLOAD
+    # ========================================================
+
+    uploaded = st.file_uploader(
+        "Upload breast ultrasound image",
+        type=[
+            "jpg",
+            "jpeg",
+            "png",
+            "webp",
+        ],
+    )
+
+    if uploaded is None:
 
         st.info(
-            "Your MammoSense breast ultrasound "
-            "model can remain here."
+            "Upload a breast ultrasound image "
+            "to begin."
         )
+
+        return
+
+    # ========================================================
+    # IMAGE
+    # ========================================================
+
+    image = Image.open(uploaded)
+
+    st.image(
+        image,
+        caption="Uploaded ultrasound",
+        use_container_width=True,
+    )
+
+    st.divider()
+
+    # ========================================================
+    # ANALYSE
+    # ========================================================
+
+    if st.button(
+        "Analyse with MammoSense",
+        type="primary",
+        use_container_width=True,
+    ):
+
+        try:
+
+            with st.spinner(
+                "MammoSense is analysing..."
+            ):
+
+                result = predict(image)
+
+            st.success(
+                "Analysis complete."
+            )
+
+            # =================================================
+            # RESULT
+            # =================================================
+
+            st.subheader(
+                "AI Result"
+            )
+
+            st.metric(
+                "Prediction",
+                result["prediction"],
+            )
+
+            st.metric(
+                "Confidence",
+                f"{result['confidence'] * 100:.2f}%",
+            )
+
+            # =================================================
+            # PROBABILITIES
+            # =================================================
+
+            st.subheader(
+                "Class probabilities"
+            )
+
+            for name, probability in result[
+                "probabilities"
+            ].items():
+
+                st.write(
+                    f"**{name}** "
+                    f"{probability * 100:.2f}%"
+                )
+
+                st.progress(
+                    probability
+                )
+
+            st.caption(
+                f"Model: {result['model']}"
+            )
+
+            st.caption(
+                f"Architecture: "
+                f"{result['architecture']}"
+            )
+
+            st.warning(
+                "AI-assisted screening only. "
+                "This result is not a medical diagnosis."
+            )
+
+        except Exception as error:
+
+            st.error(
+                "MammoSense analysis failed."
+            )
+
+            st.exception(error)
