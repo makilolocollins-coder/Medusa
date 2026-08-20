@@ -1,169 +1,113 @@
 import streamlit as st
+from pathlib import Path
+import base64
 
 
 def show_home():
 
     # ========================================================
+    # BACKGROUND
+    # ========================================================
+
+    image_path = (
+        Path(__file__).parent / "background.jpg"
+    )
+
+    if image_path.exists():
+
+        with open(image_path, "rb") as file:
+
+            encoded = base64.b64encode(
+                file.read()
+            ).decode()
+
+        st.markdown(
+            f"""
+            <style>
+
+            .stApp {{
+                background-image:
+                    linear-gradient(
+                        rgba(247, 248, 250, 0.72),
+                        rgba(247, 248, 250, 0.88)
+                    ),
+                    url(
+                        "data:image/jpeg;base64,{encoded}"
+                    );
+
+                background-size: cover;
+                background-position: center;
+                background-attachment: fixed;
+            }}
+
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    else:
+
+        st.warning(
+            "background.jpg was not found in the ui folder."
+        )
+
+
+    # ========================================================
+    # HEADER
+    # ========================================================
+
+    st.title("🧬 MEDUSA AI")
+
+    st.caption(
+        "Intelligent Health Infrastructure"
+    )
+
+
+    # ========================================================
     # HERO
     # ========================================================
 
-    st.markdown(
-"""
-<div class="hero">
-
-    <h1>
-        Your health,<br>
-        <span>intelligently connected.</span>
-    </h1>
-
-    <p>
-        Medusa combines artificial intelligence,
-        health insights and healthcare services
-        in one intelligent platform.
-    </p>
-
-</div>
-""",
-        unsafe_allow_html=True,
+    st.header(
+        "Your health, intelligently connected."
     )
 
-    # ========================================================
-    # AI CARD
-    # ========================================================
-
-    st.markdown(
-"""
-<div class="ai-card">
-
-    <div class="ai-label">
-        MEDUSA INTELLIGENCE
-    </div>
-
-    <div class="ai-title">
-        AI Health Detection
-    </div>
-
-    <div class="ai-text">
-        Start with MammoSense, Medusa's
-        breast ultrasound intelligence engine.
-    </div>
-
-</div>
-""",
-        unsafe_allow_html=True,
+    st.write(
+        "Medusa combines artificial intelligence, "
+        "health insights and healthcare services "
+        "in one intelligent platform."
     )
 
-    st.markdown("")
 
     # ========================================================
-    # START AI
+    # AI
     # ========================================================
 
-    if st.button(
-        "Start AI Analysis →",
-        type="primary",
-        use_container_width=True,
-    ):
-
-        st.session_state.page = "AI Detection"
-
-        st.rerun()
-
-    # ========================================================
-    # MODELS
-    # ========================================================
-
-    st.markdown(
-"""
-<div class="section">
-    AI Models
-</div>
-""",
-        unsafe_allow_html=True,
+    st.subheader(
+        "MEDUSA INTELLIGENCE"
     )
 
-    a, b, c = st.columns(3)
+    st.info(
+        "MammoSense\n\n"
+        "AI-assisted breast ultrasound analysis."
+    )
+
 
     # ========================================================
-    # MAMMOSENSE
+    # STATUS
     # ========================================================
 
-    with a:
+    st.success(
+        "● AI ONLINE"
+    )
 
-        st.markdown(
-"""
-<div class="model-card">
-
-    <div class="model-icon">
-        🧬
-    </div>
-
-    <div class="model-name">
-        MammoSense
-    </div>
-
-    <div class="model-description">
-        Breast ultrasound AI
-        classification.
-    </div>
-
-</div>
-""",
-            unsafe_allow_html=True,
-        )
 
     # ========================================================
-    # PROSTATE
+    # DISCLAIMER
     # ========================================================
 
-    with b:
+    st.divider()
 
-        st.markdown(
-"""
-<div class="model-card">
-
-    <div class="model-icon">
-        🧠
-    </div>
-
-    <div class="model-name">
-        Prostate AI
-    </div>
-
-    <div class="model-description">
-        Multimodal prostate MRI
-        intelligence.
-    </div>
-
-</div>
-""",
-            unsafe_allow_html=True,
-        )
-
-    # ========================================================
-    # FUTURE MODELS
-    # ========================================================
-
-    with c:
-
-        st.markdown(
-"""
-<div class="model-card">
-
-    <div class="model-icon">
-        ✦
-    </div>
-
-    <div class="model-name">
-        Medusa Intelligence
-    </div>
-
-    <div class="model-description">
-        More medical AI models
-        coming soon.
-    </div>
-
-</div>
-""",
-            unsafe_allow_html=True,
-        )
+    st.caption(
+        "AI-assisted screening only. "
+        "Not a substitute for professional medical advice."
+    )
