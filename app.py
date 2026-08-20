@@ -52,6 +52,9 @@ if "page" not in st.session_state:
 if "history" not in st.session_state:
     st.session_state.history = []
 
+if "prediction" not in st.session_state:
+    st.session_state.prediction = None
+
 
 # ============================================================
 # AUTHENTICATION
