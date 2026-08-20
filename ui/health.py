@@ -1,7 +1,11 @@
 import streamlit as st
 
+from ui.background import set_background
+
 
 def show_health():
+
+    set_background("health.jpg")
 
     st.header("❤️ Health")
 
@@ -10,10 +14,7 @@ def show_health():
         "AI analysis history."
     )
 
-
-    # ========================================================
-    # HEALTH OVERVIEW
-    # ========================================================
+    st.divider()
 
     col1, col2, col3 = st.columns(3)
 
@@ -26,13 +27,15 @@ def show_health():
 
     with col2:
 
+        latest = (
+            st.session_state.prediction
+            if st.session_state.prediction
+            else "None"
+        )
+
         st.metric(
             "Latest Result",
-            (
-                st.session_state.prediction
-                if st.session_state.prediction
-                else "None"
-            ),
+            latest,
         )
 
     with col3:
@@ -42,13 +45,7 @@ def show_health():
             "Active",
         )
 
-
     st.divider()
-
-
-    # ========================================================
-    # HISTORY
-    # ========================================================
 
     st.subheader("Analysis History")
 
@@ -61,7 +58,6 @@ def show_health():
         )
 
         return
-
 
     for item in reversed(history):
 
@@ -88,7 +84,8 @@ def show_health():
 
             st.write(
                 f"**{prediction}** "
-                f"• Confidence: {confidence_text}"
+                f"• Confidence: "
+                f"{confidence_text}"
             )
 
         else:
