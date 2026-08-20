@@ -28,7 +28,7 @@ st.set_page_config(
 
 def set_background():
 
-    image_path = Path("background.jpg")
+    image_path = Path(__file__).parent / "background.jpg"
 
     if not image_path.exists():
         return
