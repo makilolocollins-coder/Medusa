@@ -1,106 +1,107 @@
-,import torch
-from huggingface_hub import hf_hub_download
+import streamlit as st
+
+from ui.styles import load_styles
 
 
-REPO = "Makky07/MammoSense-breast-ultrasound"
-FILE = "mammosense_v2.pt"
-
-
-print("=" * 70)
-print("DOWNLOADING MAMMOSENSE V2")
-print("=" * 70)
-
-path = hf_hub_download(
-    repo_id=REPO,
-    filename=FILE,
-    repo_type="model",
-)
-
-print("Model downloaded:")
-print(path)
-
-
-print("\n" + "=" * 70)
-print("LOADING CHECKPOINT")
-print("=" * 70)
-
-checkpoint = torch.load(
-    path,
-    map_location="cpu",
-    weights_only=False,
+st.set_page_config(
+    page_title="Medusa AI",
+    page_icon="🧬",
+    layout="wide",
 )
 
 
-print("Checkpoint type:")
-print(type(checkpoint))
+load_styles()
 
 
-print("\nCheckpoint keys:")
+# =========================
+# HEADER
+# =========================
 
-if isinstance(checkpoint, dict):
+left, right = st.columns([4, 1])
 
-    for key in checkpoint.keys():
-        print("  ", key)
+with left:
 
+    st.markdown(
+        """
+        <div class="brand">
+            MEDUSA<span>◉</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-if "model_state_dict" in checkpoint:
+with right:
 
-    state = checkpoint[
-        "model_state_dict"
-    ]
-
-elif "state_dict" in checkpoint:
-
-    state = checkpoint[
-        "state_dict"
-    ]
-
-else:
-
-    state = checkpoint
-
-
-print("\n" + "=" * 70)
-print("CLASSIFIER HEAD")
-print("=" * 70)
-
-for key, value in state.items():
-
-    if key.startswith("head."):
-
-        if torch.is_tensor(value):
-
-            print(
-                key,
-                "->",
-                tuple(value.shape)
-            )
+    st.markdown(
+        """
+        <div style="text-align:right;">
+            <span class="status">
+                ● AI ONLINE
+            </span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
-print("\n" + "=" * 70)
-print("BACKBONE SUMMARY")
-print("=" * 70)
+# =========================
+# HERO
+# =========================
 
-count = 0
+st.markdown(
+    """
+    <div class="hero">
 
-for key, value in state.items():
+        <h1>
+            Your health,<br>
+            <span>intelligently connected.</span>
+        </h1>
 
-    if key.startswith("backbone."):
+        <p>
+            Medusa combines artificial intelligence,
+            health insights and healthcare services
+            in one intelligent platform.
+        </p>
 
-        if torch.is_tensor(value):
-
-            print(
-                key,
-                "->",
-                tuple(value.shape)
-            )
-
-            count += 1
-
-            if count >= 20:
-                break
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 
-print("\n" + "=" * 70)
-print("DONE")
-print("=" * 70)
+# =========================
+# TEST CARD
+# =========================
+
+st.markdown(
+    """
+    <div class="ai-card">
+
+        <div class="ai-label">
+            MEDUSA INTELLIGENCE
+        </div>
+
+        <div class="ai-title">
+            AI Health Detection
+        </div>
+
+        <div class="ai-text">
+            MammoSense breast ultrasound
+            intelligence is coming next.
+        </div>
+
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+st.markdown(
+    """
+    <div class="medusa-footer">
+        MEDUSA AI<br>
+        Intelligent Health Infrastructure
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
