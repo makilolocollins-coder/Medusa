@@ -2,10 +2,16 @@ import streamlit as st
 
 from ui.styles import load_styles
 from ui.home import show_home
+from ui.detection import show_detection
 from ui.health import show_health
 from ui.marketplace import show_marketplace
 from ui.profile import show_profile
-from ui.detection import show_detection
+
+from ui.auth import (
+    show_auth,
+    show_verification,
+    show_login,
+)
 
 
 # ============================================================
@@ -31,30 +37,100 @@ load_styles()
 # SESSION STATE
 # ============================================================
 
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+if "auth_step" not in st.session_state:
+    st.session_state.auth_step = "login"
+
+if "auth_email" not in st.session_state:
+    st.session_state.auth_email = ""
+
 if "page" not in st.session_state:
     st.session_state.page = "Home"
 
 if "history" not in st.session_state:
     st.session_state.history = []
 
-if "prediction" not in st.session_state:
-    st.session_state.prediction = None
+
+# ============================================================
+# AUTHENTICATION
+# ============================================================
+
+if not st.session_state.authenticated:
+
+    # --------------------------------------------------------
+    # REGISTRATION
+    # --------------------------------------------------------
+
+    if st.session_state.auth_step == "register":
+
+        show_auth()
+
+        st.divider()
+
+        if st.button(
+            "Already have an account? Login",
+            use_container_width=True,
+        ):
+
+            st.session_state.auth_step = "login"
+            st.rerun()
+
+
+    # --------------------------------------------------------
+    # VERIFICATION
+    # --------------------------------------------------------
+
+    elif st.session_state.auth_step == "verify":
+
+        show_verification()
+
+        st.divider()
+
+        if st.button(
+            "Back to login",
+            use_container_width=True,
+        ):
+
+            st.session_state.auth_step = "login"
+            st.rerun()
+
+
+    # --------------------------------------------------------
+    # LOGIN
+    # --------------------------------------------------------
+
+    else:
+
+        show_login()
+
+        st.divider()
+
+        if st.button(
+            "Create a new account",
+            use_container_width=True,
+        ):
+
+            st.session_state.auth_step = "register"
+            st.rerun()
+
+
+    st.stop()
 
 
 # ============================================================
-# HEADER
+# MAIN APPLICATION
 # ============================================================
 
-top_left, top_right = st.columns([4, 1])
-
-with top_left:
-
-    st.title("🧬 MEDUSA AI")
-    st.caption("Intelligent Health Infrastructure")
-
-with top_right:
-
-    st.success("● AI ONLINE")
+st.markdown(
+    """
+    <div class="brand">
+        MEDUSA<span>◉</span>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 
 # ============================================================
@@ -69,20 +145,16 @@ pages = [
     "Profile",
 ]
 
-selected_page = st.radio(
+
+selected = st.radio(
     "Navigation",
     pages,
-    index=pages.index(
-        st.session_state.page
-    ),
     horizontal=True,
     label_visibility="collapsed",
 )
 
-st.session_state.page = selected_page
 
-
-st.divider()
+st.session_state.page = selected
 
 
 # ============================================================
