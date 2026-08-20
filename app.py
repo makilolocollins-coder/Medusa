@@ -142,20 +142,13 @@ elif st.session_state.page == "Profile":
 # ============================================================
 
 st.markdown(
-    """
-    <div class="footer">
-
-        MEDUSA AI
-        <br>
-        Intelligent Health Infrastructure
-
-        <br><br>
-
-        AI-assisted screening only.
-        Not a substitute for professional
-        medical advice.
-
-    </div>
-    """,
+"""
+<div class="footer">
+    <strong>MEDUSA AI</strong><br>
+    Intelligent Health Infrastructure<br><br>
+    AI-assisted screening only.<br>
+    Not a substitute for professional medical advice.
+</div>
+""",
     unsafe_allow_html=True,
 )
