@@ -5,7 +5,25 @@ from ui.background import set_background
 
 def show_health():
 
+    # ========================================================
+    # BACKGROUND
+    # ========================================================
+
     set_background("health.jpg")
+
+    # ========================================================
+    # SESSION STATE SAFETY
+    # ========================================================
+
+    if "history" not in st.session_state:
+        st.session_state.history = []
+
+    if "prediction" not in st.session_state:
+        st.session_state.prediction = None
+
+    # ========================================================
+    # HEADER
+    # ========================================================
 
     st.header("❤️ Health")
 
@@ -15,6 +33,10 @@ def show_health():
     )
 
     st.divider()
+
+    # ========================================================
+    # HEALTH SUMMARY
+    # ========================================================
 
     col1, col2, col3 = st.columns(3)
 
@@ -47,6 +69,10 @@ def show_health():
 
     st.divider()
 
+    # ========================================================
+    # HISTORY
+    # ========================================================
+
     st.subheader("Analysis History")
 
     history = st.session_state.history
@@ -58,6 +84,10 @@ def show_health():
         )
 
         return
+
+    # ========================================================
+    # DISPLAY HISTORY
+    # ========================================================
 
     for item in reversed(history):
 
@@ -90,4 +120,6 @@ def show_health():
 
         else:
 
-            st.write(str(item))
+            st.write(
+                str(item)
+            )
