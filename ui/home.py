@@ -1,52 +1,11 @@
 import streamlit as st
-from pathlib import Path
-import base64
+
+from ui.background import set_background
 
 
 def show_home():
 
-    # ========================================================
-    # BACKGROUND
-    # ========================================================
-
-    image_path = Path(__file__).parent.parent / "background.jpg"
-
-    if image_path.exists():
-
-        with open(image_path, "rb") as file:
-
-            encoded = base64.b64encode(
-                file.read()
-            ).decode()
-
-        st.markdown(
-            f"""
-            <style>
-
-            .stApp {{
-                background-image:
-                    linear-gradient(
-                        rgba(247,248,250,0.72),
-                        rgba(247,248,250,0.90)
-                    ),
-                    url(
-                        "data:image/jpeg;base64,{encoded}"
-                    );
-
-                background-size: cover;
-                background-position: center;
-                background-attachment: fixed;
-            }}
-
-            </style>
-            """,
-            unsafe_allow_html=True,
-        )
-
-
-    # ========================================================
-    # HERO
-    # ========================================================
+    set_background("home.jpg")
 
     st.header(
         "Your health, intelligently connected."
@@ -60,11 +19,6 @@ def show_home():
 
     st.write("")
 
-
-    # ========================================================
-    # AI DETECTION
-    # ========================================================
-
     st.subheader(
         "🧠 Medusa Intelligence"
     )
@@ -73,7 +27,6 @@ def show_home():
         "MammoSense\n\n"
         "AI-assisted breast ultrasound analysis."
     )
-
 
     if st.button(
         "Start AI Analysis →",
@@ -84,11 +37,6 @@ def show_home():
         st.session_state.page = "AI Detection"
 
         st.rerun()
-
-
-    # ========================================================
-    # MODELS
-    # ========================================================
 
     st.subheader("AI Models")
 
@@ -105,7 +53,6 @@ def show_home():
 
         st.success("Available")
 
-
     with col2:
 
         st.markdown("### 🧠 Prostate AI")
@@ -117,7 +64,6 @@ def show_home():
 
         st.info("Coming soon")
 
-
     with col3:
 
         st.markdown("### ✦ More AI")
@@ -128,11 +74,6 @@ def show_home():
         )
 
         st.info("Coming soon")
-
-
-    # ========================================================
-    # DISCLAIMER
-    # ========================================================
 
     st.divider()
 
