@@ -752,3 +752,34 @@ def get_mammosense():
         _ENGINE = MammoSense()
 
     return _ENGINE
+
+# ============================================================
+# UI COMPATIBILITY FUNCTIONS
+# ============================================================
+
+def load_model():
+
+    """
+    Loads the MammoSense engine and returns
+    metadata required by the Streamlit UI.
+    """
+
+    engine = get_mammosense()
+
+    return {
+        "model_file": MODEL_FILE,
+        "architecture": engine.architecture,
+        "classes": engine.classes,
+        "device": str(engine.device),
+    }
+
+
+def predict(image):
+
+    """
+    Runs MammoSense prediction on a PIL image.
+    """
+
+    engine = get_mammosense()
+
+    return engine.predict(image)
