@@ -9,24 +9,44 @@ def show_health():
 
     st.header("❤️ Health")
 
-    st.write("Health page is running the NEW version.")
+    st.write(
+        "Your health information and "
+        "AI analysis history."
+    )
 
-    history = st.session_state.get("history", [])
-    prediction = st.session_state.get("prediction", None)
+    st.divider()
 
-    st.write("History records:", len(history))
-    st.write("Latest prediction:", prediction)
+    history = st.session_state.history
+    prediction = st.session_state.prediction
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.metric(
+            "AI Analyses",
+            len(history),
+        )
+
+    with col2:
+        st.metric(
+            "Latest Result",
+            prediction if prediction else "None",
+        )
+
+    with col3:
+        st.metric(
+            "Status",
+            "Active",
+        )
 
     st.divider()
 
     st.subheader("Analysis History")
 
     if not history:
-
         st.info(
             "No AI analysis has been completed yet."
         )
-
         return
 
     for item in reversed(history):
@@ -39,8 +59,7 @@ def show_health():
             )
 
             confidence = item.get(
-                "confidence",
-                None,
+                "confidence"
             )
 
             if confidence is not None:
@@ -54,5 +73,4 @@ def show_health():
             )
 
         else:
-
             st.write(str(item))
