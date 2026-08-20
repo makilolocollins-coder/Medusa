@@ -7,51 +7,28 @@ from ai.mammosense import get_mammosense
 
 def show_detection():
 
-    # --------------------------------------------------------
-    # BACKGROUND
-    # --------------------------------------------------------
-
     set_background("detection.jpg")
-
-    # --------------------------------------------------------
-    # HEADER
-    # --------------------------------------------------------
 
     st.header("🧬 AI Detection")
 
     st.write(
         "Upload a breast ultrasound image "
-        "for MammoSense AI-assisted analysis."
+        "for MammoSense analysis."
     )
 
     st.divider()
 
-    # --------------------------------------------------------
-    # UPLOAD
-    # --------------------------------------------------------
-
     uploaded = st.file_uploader(
         "Upload ultrasound image",
-        type=[
-            "jpg",
-            "jpeg",
-            "png",
-            "webp",
-        ],
+        type=["jpg", "jpeg", "png", "webp"],
     )
 
     if uploaded is None:
-
         st.info(
             "Upload a breast ultrasound image "
             "to begin analysis."
         )
-
         return
-
-    # --------------------------------------------------------
-    # IMAGE
-    # --------------------------------------------------------
 
     image = Image.open(uploaded).convert("RGB")
 
@@ -63,10 +40,6 @@ def show_detection():
 
     st.divider()
 
-    # --------------------------------------------------------
-    # ANALYSE BUTTON
-    # --------------------------------------------------------
-
     if st.button(
         "🔬 Analyse with MammoSense",
         type="primary",
@@ -75,100 +48,47 @@ def show_detection():
 
         try:
 
-            # ------------------------------------------------
-            # LOAD MODEL
-            # ------------------------------------------------
-
-            with st.spinner(
-                "Loading MammoSense AI..."
-            ):
-
+            with st.spinner("Loading MammoSense AI..."):
                 engine = get_mammosense()
 
-            # ------------------------------------------------
-            # PREDICT
-            # ------------------------------------------------
-
-            with st.spinner(
-                "Analysing ultrasound..."
-            ):
-
+            with st.spinner("Analysing ultrasound..."):
                 result = engine.predict(image)
 
-            # ------------------------------------------------
-            # RESULT
-            # ------------------------------------------------
+            st.success("Analysis complete.")
 
-            st.success(
-                "Analysis complete."
-            )
+            st.subheader("MammoSense Result")
 
-            st.subheader(
-                "MammoSense Result"
-            )
-
-            prediction = result[
-                "prediction"
-            ]
-
-            confidence = result[
-                "confidence"
-            ]
-
-            # ------------------------------------------------
-            # MAIN RESULT
-            # ------------------------------------------------
+            prediction = result["prediction"]
+            confidence = result["confidence"]
 
             st.metric(
                 "AI Classification",
                 prediction,
             )
 
-            st.progress(
-                confidence
-            )
-
             st.write(
-                f"Confidence: "
-                f"**{confidence * 100:.2f}%**"
+                f"Confidence: **{confidence * 100:.2f}%**"
             )
 
-            # ------------------------------------------------
-            # CLASS PROBABILITIES
-            # ------------------------------------------------
+            st.progress(confidence)
 
-            st.subheader(
-                "Class Probabilities"
-            )
+            st.subheader("Class Probabilities")
 
-            probabilities = result[
+            for name, probability in result[
                 "probabilities"
-            ]
-
-            for name, probability in (
-                probabilities.items()
-            ):
+            ].items():
 
                 st.write(
-                    f"**{name}**: "
+                    f"**{name}:** "
                     f"{probability * 100:.2f}%"
                 )
 
-                st.progress(
-                    probability
-                )
+                st.progress(probability)
 
-            # ------------------------------------------------
-            # MODEL INFORMATION
-            # ------------------------------------------------
-
-            with st.expander(
-                "Model information"
-            ):
+            with st.expander("Model information"):
 
                 st.write(
-                    f"**Model:** "
-                    f"{result['model']}"
+                    f"**Model:** {result['model']}"
                 )
 
                 st.write(
@@ -177,30 +97,18 @@ def show_detection():
                 )
 
                 st.write(
-                    f"**Device:** "
-                    f"{result['device']}"
+                    f"**Device:** {result['device']}"
                 )
-
-            # ------------------------------------------------
-            # MEDICAL DISCLAIMER
-            # ------------------------------------------------
 
             st.warning(
                 "AI-assisted screening only. "
-                "This result is not a diagnosis and "
-                "should not replace assessment by a "
-                "qualified healthcare professional."
+                "This is not a medical diagnosis."
             )
 
         except Exception as error:
 
             st.error(
-                "MammoSense could not analyse "
-                "this image."
+                "MammoSense could not analyse this image."
             )
 
-            with st.expander(
-                "Technical error"
-            ):
-
-                st.exception(error)
+            st.exception(error)
