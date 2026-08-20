@@ -3,56 +3,94 @@ import streamlit as st
 
 def show_health():
 
-    st.markdown(
-        """
-        <div class="hero">
+    st.header("❤️ Health")
 
-            <h1>
-                Your Health
-            </h1>
-
-            <p>
-                View your Medusa AI analysis history.
-            </p>
-
-        </div>
-        """,
-        unsafe_allow_html=True,
+    st.write(
+        "Your health information and "
+        "AI analysis history."
     )
+
+
+    # ========================================================
+    # HEALTH OVERVIEW
+    # ========================================================
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+
+        st.metric(
+            "AI Analyses",
+            len(st.session_state.history),
+        )
+
+    with col2:
+
+        st.metric(
+            "Latest Result",
+            (
+                st.session_state.prediction
+                if st.session_state.prediction
+                else "None"
+            ),
+        )
+
+    with col3:
+
+        st.metric(
+            "Status",
+            "Active",
+        )
+
+
+    st.divider()
+
+
+    # ========================================================
+    # HISTORY
+    # ========================================================
+
+    st.subheader("Analysis History")
 
     history = st.session_state.history
 
     if not history:
 
         st.info(
-            "No AI analysis has been performed yet."
+            "No AI analysis has been completed yet."
         )
 
         return
 
+
     for item in reversed(history):
 
-        st.markdown(
-            f"""
-            <div class="card">
+        if isinstance(item, dict):
 
-                <div class="card-title">
-                    🧬 MammoSense Analysis
-                </div>
+            prediction = item.get(
+                "prediction",
+                "Unknown",
+            )
 
-                <div class="card-text">
+            confidence = item.get(
+                "confidence"
+            )
 
-                    Result:
-                    <b>{item["prediction"]}</b>
+            if confidence is not None:
 
-                    <br>
+                confidence_text = (
+                    f"{confidence:.1%}"
+                )
 
-                    Confidence:
-                    {item["confidence"] * 100:.2f}%
+            else:
 
-                </div>
+                confidence_text = "N/A"
 
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+            st.write(
+                f"**{prediction}** "
+                f"• Confidence: {confidence_text}"
+            )
+
+        else:
+
+            st.write(str(item))
