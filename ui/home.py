@@ -9,9 +9,7 @@ def show_home():
     # BACKGROUND
     # ========================================================
 
-    image_path = (
-        Path(__file__).parent / "background.jpg"
-    )
+    image_path = Path(__file__).parent.parent / "background.jpg"
 
     if image_path.exists():
 
@@ -28,8 +26,8 @@ def show_home():
             .stApp {{
                 background-image:
                     linear-gradient(
-                        rgba(247, 248, 250, 0.72),
-                        rgba(247, 248, 250, 0.88)
+                        rgba(247,248,250,0.72),
+                        rgba(247,248,250,0.90)
                     ),
                     url(
                         "data:image/jpeg;base64,{encoded}"
@@ -44,23 +42,6 @@ def show_home():
             """,
             unsafe_allow_html=True,
         )
-
-    else:
-
-        st.warning(
-            "background.jpg was not found in the ui folder."
-        )
-
-
-    # ========================================================
-    # HEADER
-    # ========================================================
-
-    st.title("🧬 MEDUSA AI")
-
-    st.caption(
-        "Intelligent Health Infrastructure"
-    )
 
 
     # ========================================================
@@ -77,13 +58,15 @@ def show_home():
         "in one intelligent platform."
     )
 
+    st.write("")
+
 
     # ========================================================
-    # AI
+    # AI DETECTION
     # ========================================================
 
     st.subheader(
-        "MEDUSA INTELLIGENCE"
+        "🧠 Medusa Intelligence"
     )
 
     st.info(
@@ -92,13 +75,59 @@ def show_home():
     )
 
 
+    if st.button(
+        "Start AI Analysis →",
+        type="primary",
+        use_container_width=True,
+    ):
+
+        st.session_state.page = "AI Detection"
+
+        st.rerun()
+
+
     # ========================================================
-    # STATUS
+    # MODELS
     # ========================================================
 
-    st.success(
-        "● AI ONLINE"
-    )
+    st.subheader("AI Models")
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+
+        st.markdown("### 🧬 MammoSense")
+
+        st.write(
+            "Breast ultrasound AI "
+            "classification."
+        )
+
+        st.success("Available")
+
+
+    with col2:
+
+        st.markdown("### 🧠 Prostate AI")
+
+        st.write(
+            "Multimodal prostate MRI "
+            "intelligence."
+        )
+
+        st.info("Coming soon")
+
+
+    with col3:
+
+        st.markdown("### ✦ More AI")
+
+        st.write(
+            "Additional medical AI "
+            "systems."
+        )
+
+        st.info("Coming soon")
 
 
     # ========================================================
