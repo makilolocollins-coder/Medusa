@@ -3,102 +3,74 @@ import streamlit as st
 
 def show_marketplace():
 
-    st.markdown(
-        """
-        <div class="hero">
+    st.header("🛒 Marketplace")
 
-            <h1>
-                Healthcare,<br>
-                <span>connected.</span>
-            </h1>
-
-            <p>
-                Discover healthcare professionals,
-                diagnostic centres and healthcare
-                services through Medusa.
-            </p>
-
-        </div>
-        """,
-        unsafe_allow_html=True,
+    st.write(
+        "Healthcare services, products and "
+        "resources available through Medusa."
     )
 
-    a, b, c = st.columns(3)
 
-    with a:
+    # ========================================================
+    # SERVICES
+    # ========================================================
 
-        st.markdown(
-            """
-            <div class="market">
+    col1, col2, col3 = st.columns(3)
 
-                <div class="market-icon">
-                    👨‍⚕️
-                </div>
 
-                <div class="market-title">
-                    Doctors
-                </div>
+    with col1:
 
-                <div class="market-text">
-                    Connect with qualified
-                    healthcare professionals.
-                </div>
+        st.subheader("🩺 Healthcare")
 
-            </div>
-            """,
-            unsafe_allow_html=True,
+        st.write(
+            "Connect with healthcare "
+            "professionals and services."
         )
 
-    with b:
-
-        st.markdown(
-            """
-            <div class="market">
-
-                <div class="market-icon">
-                    🏥
-                </div>
-
-                <div class="market-title">
-                    Diagnostics
-                </div>
-
-                <div class="market-text">
-                    Find imaging centres,
-                    laboratories and diagnostic
-                    services.
-                </div>
-
-            </div>
-            """,
-            unsafe_allow_html=True,
+        st.button(
+            "Explore",
+            key="healthcare",
         )
 
-    with c:
 
-        st.markdown(
-            """
-            <div class="market">
+    with col2:
 
-                <div class="market-icon">
-                    💊
-                </div>
+        st.subheader("💊 Pharmacy")
 
-                <div class="market-title">
-                    Pharmacy
-                </div>
-
-                <div class="market-text">
-                    Access trusted healthcare
-                    products and services.
-                </div>
-
-            </div>
-            """,
-            unsafe_allow_html=True,
+        st.write(
+            "Access trusted healthcare "
+            "products and resources."
         )
+
+        st.button(
+            "Explore",
+            key="pharmacy",
+        )
+
+
+    with col3:
+
+        st.subheader("🔬 Diagnostics")
+
+        st.write(
+            "Explore diagnostic and "
+            "laboratory services."
+        )
+
+        st.button(
+            "Explore",
+            key="diagnostics",
+        )
+
+
+    st.divider()
+
+
+    # ========================================================
+    # COMING SOON
+    # ========================================================
 
     st.info(
-        "The Medusa marketplace will be connected "
-        "to real providers in a future phase."
+        "Marketplace services are being "
+        "prepared for Medusa."
     )
