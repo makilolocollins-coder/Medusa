@@ -3,42 +3,67 @@ import streamlit as st
 
 def show_profile():
 
-    st.markdown(
-        """
-        <div class="hero">
+    st.header("👤 Profile")
 
-            <h1>
-                Profile
-            </h1>
-
-            <p>
-                Manage your Medusa experience.
-            </p>
-
-        </div>
-        """,
-        unsafe_allow_html=True,
+    st.write(
+        "Manage your Medusa profile and "
+        "application preferences."
     )
 
-    st.markdown(
-        """
-        <div class="card">
 
-            <div class="card-title">
-                👤 Medusa User
-            </div>
+    # ========================================================
+    # PROFILE
+    # ========================================================
 
-            <br>
+    name = st.text_input(
+        "Name",
+        placeholder="Enter your name",
+    )
 
-            <div class="card-text">
+    email = st.text_input(
+        "Email",
+        placeholder="Enter your email",
+    )
 
-                Account management, privacy,
-                notifications and health
-                preferences will appear here.
 
-            </div>
+    # ========================================================
+    # PREFERENCES
+    # ========================================================
 
-        </div>
-        """,
-        unsafe_allow_html=True,
+    st.subheader("Preferences")
+
+    notifications = st.toggle(
+        "Enable notifications",
+        value=True,
+    )
+
+    save = st.button(
+        "Save Profile",
+        type="primary",
+    )
+
+
+    if save:
+
+        st.success(
+            "Profile preferences saved."
+        )
+
+
+    # ========================================================
+    # ACCOUNT
+    # ========================================================
+
+    st.divider()
+
+    st.subheader("Account")
+
+    st.write(
+        f"Notifications: "
+        f"{'Enabled' if notifications else 'Disabled'}"
+    )
+
+    st.caption(
+        "Medusa keeps your health experience "
+        "organized in one place."
     )
