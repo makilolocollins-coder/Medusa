@@ -1,202 +1,174 @@
 import streamlit as st
 
-from ui.styles import load_styles
-from ui.home import show_home
-from ui.detection import show_detection
-from ui.health import show_health
-from ui.marketplace import show_marketplace
-from ui.profile import show_profile
+from utils.supabase_client import get_supabase
 
-from ui.auth import (
-    show_auth,
-    show_verification,
-    show_login,
-)
 
+def show_auth():
 
-# ============================================================
-# PAGE CONFIG
-# ============================================================
+    supabase = get_supabase()
 
-st.set_page_config(
-    page_title="Medusa AI",
-    page_icon="🧬",
-    layout="wide",
-    initial_sidebar_state="collapsed",
-)
+    st.title("🧬 MEDUSA AI")
 
+    st.subheader("Create your account")
 
-# ============================================================
-# DESIGN
-# ============================================================
+    email = st.text_input(
+        "Email address",
+        placeholder="you@example.com",
+    )
 
-load_styles()
+    password = st.text_input(
+        "Password",
+        type="password",
+    )
 
+    if st.button(
+        "Create account",
+        type="primary",
+        use_container_width=True,
+    ):
 
-# ============================================================
-# SESSION STATE
-# ============================================================
+        if not email or not password:
 
-if "authenticated" not in st.session_state:
-    st.session_state.authenticated = False
+            st.error(
+                "Enter your email and password."
+            )
+            return
 
-if "auth_step" not in st.session_state:
-    st.session_state.auth_step = "login"
+        if len(password) < 6:
 
-if "auth_email" not in st.session_state:
-    st.session_state.auth_email = ""
+            st.error(
+                "Password must be at least 6 characters."
+            )
+            return
 
-if "page" not in st.session_state:
-    st.session_state.page = "Home"
+        try:
 
-if "history" not in st.session_state:
-    st.session_state.history = []
+            response = supabase.auth.sign_up(
+                {
+                    "email": email,
+                    "password": password,
+                }
+            )
 
+            if response.user:
 
-# ============================================================
-# AUTHENTICATION
-# ============================================================
+                st.session_state.auth_email = email
+                st.session_state.auth_step = "verify"
 
-if not st.session_state.authenticated:
+                st.success(
+                    "Account created. "
+                    "Check your email to verify your account."
+                )
 
-    # --------------------------------------------------------
-    # REGISTRATION
-    # --------------------------------------------------------
+                st.rerun()
 
-    if st.session_state.auth_step == "register":
+        except Exception as error:
 
-        show_auth()
+            st.error(
+                f"Could not create account: {error}"
+            )
 
-        st.divider()
 
-        if st.button(
-            "Already have an account? Login",
-            use_container_width=True,
-        ):
+def show_verification():
 
-            st.session_state.auth_step = "login"
-            st.rerun()
+    supabase = get_supabase()
 
+    st.title("📧 Verify your email")
 
-    # --------------------------------------------------------
-    # VERIFICATION
-    # --------------------------------------------------------
+    email = st.session_state.get(
+        "auth_email",
+        "",
+    )
 
-    elif st.session_state.auth_step == "verify":
+    st.write(
+        f"We sent a verification email to **{email}**."
+    )
 
-        show_verification()
+    st.info(
+        "Open the email and follow the verification "
+        "instructions."
+    )
 
-        st.divider()
+    st.divider()
 
-        if st.button(
-            "Back to login",
-            use_container_width=True,
-        ):
+    st.subheader("Already verified?")
 
-            st.session_state.auth_step = "login"
-            st.rerun()
+    if st.button(
+        "Continue",
+        type="primary",
+        use_container_width=True,
+    ):
 
+        try:
 
-    # --------------------------------------------------------
-    # LOGIN
-    # --------------------------------------------------------
+            user = supabase.auth.get_user()
 
-    else:
+            if user and user.user:
 
-        show_login()
+                st.session_state.authenticated = True
+                st.session_state.auth_step = (
+                    "authenticated"
+                )
 
-        st.divider()
+                st.rerun()
 
-        if st.button(
-            "Create a new account",
-            use_container_width=True,
-        ):
+            else:
 
-            st.session_state.auth_step = "register"
-            st.rerun()
+                st.warning(
+                    "Your email has not been verified yet."
+                )
 
+        except Exception as error:
 
-    st.stop()
+            st.error(
+                f"Could not check verification: {error}"
+            )
 
 
-# ============================================================
-# MAIN APPLICATION
-# ============================================================
+def show_login():
 
-st.markdown(
-    """
-    <div class="brand">
-        MEDUSA<span>◉</span>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+    supabase = get_supabase()
 
+    st.title("Welcome back")
 
-# ============================================================
-# NAVIGATION
-# ============================================================
+    email = st.text_input(
+        "Email address",
+        key="login_email",
+    )
 
-pages = [
-    "Home",
-    "AI Detection",
-    "Health",
-    "Marketplace",
-    "Profile",
-]
+    password = st.text_input(
+        "Password",
+        type="password",
+        key="login_password",
+    )
 
+    if st.button(
+        "Login",
+        type="primary",
+        use_container_width=True,
+    ):
 
-selected = st.radio(
-    "Navigation",
-    pages,
-    horizontal=True,
-    label_visibility="collapsed",
-)
+        try:
 
+            response = supabase.auth.sign_in_with_password(
+                {
+                    "email": email,
+                    "password": password,
+                }
+            )
 
-st.session_state.page = selected
+            if response.user:
 
+                st.session_state.authenticated = True
+                st.session_state.auth_step = (
+                    "authenticated"
+                )
 
-# ============================================================
-# PAGE ROUTING
-# ============================================================
+                st.rerun()
 
-if st.session_state.page == "Home":
+        except Exception as error:
 
-    show_home()
-
-
-elif st.session_state.page == "AI Detection":
-
-    show_detection()
-
-
-elif st.session_state.page == "Health":
-
-    show_health()
-
-
-elif st.session_state.page == "Marketplace":
-
-    show_marketplace()
-
-
-elif st.session_state.page == "Profile":
-
-    show_profile()
-
-
-# ============================================================
-# FOOTER
-# ============================================================
-
-st.divider()
-
-st.caption(
-    "MEDUSA AI • Intelligent Health Infrastructure"
-)
-
-st.caption(
-    "AI-assisted screening only. "
-    "Not a substitute for professional medical advice."
-)
+            st.error(
+                "Login failed. Check your email "
+                "and password."
+            )
