@@ -1,16 +1,19 @@
 import streamlit as st
+import textwrap
 from PIL import Image
 
 from ai.mammosense import (
     load_model,
     predict,
 )
-st.success("MEDUSA BUILD: V2-2026-08-19")
+
 
 def show_detection():
 
+    st.success("MEDUSA BUILD: V2-2026-08-19")
+
     st.markdown(
-        """
+        textwrap.dedent("""
         <div class="hero">
 
             <h1>
@@ -23,7 +26,7 @@ def show_detection():
             </p>
 
         </div>
-        """,
+        """),
         unsafe_allow_html=True,
     )
 
@@ -103,132 +106,3 @@ def show_detection():
             caption="Ultrasound image",
             use_container_width=True,
         )
-
-    with right:
-
-        st.markdown(
-            """
-            <div class="card">
-
-                <div class="card-title">
-                    Image ready
-                </div>
-
-                <br>
-
-                <div class="card-text">
-                    Your image is ready for
-                    MammoSense analysis.
-                </div>
-
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        if st.button(
-            "Analyse with MammoSense →",
-            type="primary",
-            use_container_width=True,
-        ):
-
-            with st.spinner(
-                "Medusa is analysing..."
-            ):
-
-                result = predict(
-                    image
-                )
-
-            st.session_state.prediction = result
-
-            st.session_state.history.append(
-                {
-                    "prediction":
-                        result["prediction"],
-
-                    "confidence":
-                        result["confidence"],
-                }
-            )
-
-            st.rerun()
-
-    result = (
-        st.session_state.prediction
-    )
-
-    if result is None:
-        return
-
-    st.markdown("---")
-
-    st.markdown(
-        '<div class="section">'
-        'Analysis Result'
-        '</div>',
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        f"""
-        <div class="result">
-
-            <div class="result-small">
-                MammoSense classification
-            </div>
-
-            <div class="result-name">
-                {result["prediction"]}
-            </div>
-
-            <div class="result-confidence">
-                Confidence:
-                {result["confidence"] * 100:.2f}%
-            </div>
-
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        '<div class="section">'
-        'Probability Distribution'
-        '</div>',
-        unsafe_allow_html=True,
-    )
-
-    for (
-        name,
-        probability,
-    ) in result[
-        "probabilities"
-    ].items():
-
-        st.write(
-            f"**{name}**"
-        )
-
-        st.progress(
-            probability
-        )
-
-        st.caption(
-            f"{probability * 100:.2f}%"
-        )
-
-    st.markdown(
-        """
-        <div class="warning">
-
-        ⚠️ <b>Medical notice:</b>
-        Medusa provides AI-assisted screening
-        support. This result is not a diagnosis
-        and should be reviewed by a qualified
-        healthcare professional.
-
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
