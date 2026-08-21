@@ -261,73 +261,93 @@ def show_radiologist():
 
         return
 
-    # ========================================================
-    # LOAD ACTUAL ULTRASOUND
-    # ========================================================
+# ========================================================
+# LOAD ACTUAL ULTRASOUND
+# ========================================================
 
-    image_path = scan.get(
-        "image_path"
+image_path = scan.get(
+    "image_path"
+)
+
+st.subheader("🩻 Ultrasound Image")
+
+if image_path:
+
+    st.caption(
+        f"Image path: {image_path}"
     )
 
-    st.subheader("🩻 Ultrasound Image")
+    try:
 
-    if image_path:
+        storage = supabase.storage.from_(
+            "mammosense-scans"
+        )
 
-        try:
+        signed = storage.create_signed_url(
+            image_path,
+            3600,
+        )
 
-            signed_url_response = (
-                supabase
-                .storage
-                .from_("mammosense-scans")
-                .create_signed_url(
-                    image_path,
-                    3600,
-                )
+        # Supabase Python client can return
+        # different key formats depending on version
+
+        if isinstance(signed, dict):
+
+            signed_url = (
+                signed.get("signedURL")
+                or signed.get("signedUrl")
+                or signed.get("signed_url")
             )
 
-            signed_url = signed_url_response.get(
-                "signedURL"
+        else:
+
+            signed_url = getattr(
+                signed,
+                "signedURL",
+                None,
             )
 
             if not signed_url:
 
-                signed_url = signed_url_response.get(
-                    "signedUrl"
+                signed_url = getattr(
+                    signed,
+                    "signedUrl",
+                    None,
                 )
 
-            if signed_url:
+        if signed_url:
 
-                st.image(
-                    signed_url,
-                    caption="Patient ultrasound",
-                    use_container_width=True,
-                )
-
-            else:
-
-                st.warning(
-                    "Could not generate a secure image URL."
-                )
-
-        except Exception as error:
-
-            st.error(
-                "Could not load the ultrasound image."
+            st.image(
+                signed_url,
+                caption="Patient ultrasound",
+                use_container_width=True,
             )
 
-            st.exception(error)
+        else:
 
-    else:
+            st.error(
+                "Supabase did not return "
+                "a signed image URL."
+            )
 
-        st.warning(
-            "This scan does not have an image attached."
+    except Exception as error:
+
+        st.error(
+            "Could not access the ultrasound image."
         )
 
-        st.info(
-            "Only scans uploaded after image storage "
-            "was enabled will contain the original image."
-        )
+        st.exception(error)
 
+else:
+
+    st.warning(
+        "This scan does not have an image attached."
+    )
+
+    st.info(
+        "Only scans uploaded after image storage "
+        "was enabled will contain the original image."
+    )
     # ========================================================
     # AI RESULTS
     # ========================================================
