@@ -53,6 +53,18 @@ if "page" not in st.session_state:
 if "history" not in st.session_state:
     st.session_state.history = []
 
+if "scan_result" not in st.session_state:
+    st.session_state.scan_result = None
+
+if "scan_id" not in st.session_state:
+    st.session_state.scan_id = None
+
+if "consultation_booked" not in st.session_state:
+    st.session_state.consultation_booked = False
+
+if "review_requested" not in st.session_state:
+    st.session_state.review_requested = False
+
 if "prediction" not in st.session_state:
     st.session_state.prediction = None
 
