@@ -2,7 +2,7 @@ import streamlit as st
 
 from ui.background import set_background
 from utils.supabase_client import get_supabase
-
+from datetime import datetime, timezone
 
 def show_radiologist():
 
@@ -427,24 +427,41 @@ def show_radiologist():
         try:
 
             (
-                supabase
-                .table("radiologist_requests")
-                .update({
-                    "status": "Reviewed",
-                    "radiologist_id": radiologist_id,
-                    "radiologist_note": note.strip(),
-                    "reviewed_at": "now()"
-                })
-                .eq(
-                    "id",
-                    selected["id"]
-                )
-                .execute()
-            )
+                result = (
+    supabase
+    .table("radiologist_requests")
+    .update({
+        "status": "Reviewed",
+        "radiologist_id": radiologist_id,
+        "radiologist_note": note.strip(),
+        "reviewed_at": datetime.now(
+            timezone.utc
+        ).isoformat(),
+    })
+    .eq(
+        "id",
+        selected["id"]
+    )
+    .execute()
+)
 
-            st.success(
-                "✅ Review completed successfully."
-            )
+if not result.data:
+
+    st.error(
+        "The review could not be saved. "
+        "Supabase did not update the request."
+    )
+
+    st.write(
+        "Request ID:",
+        selected["id"]
+    )
+
+    return
+
+st.success(
+    "✅ Review saved successfully."
+)
 
             st.session_state.pop(
                 "selected_request",
