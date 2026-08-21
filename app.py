@@ -164,7 +164,6 @@ if not st.session_state.authenticated:
 # ============================================================
 # MAIN APPLICATION
 # ============================================================
-st.write("Radiologist detected:", is_radiologist)
 st.markdown(
     """
     <div class="brand">
