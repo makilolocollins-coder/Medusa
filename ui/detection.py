@@ -105,12 +105,10 @@ def show_detection():
     # RESULT
     # ========================================================
 
-    if "scan_result" not in st.session_state:
+    result = st.session_state.get("scan_result")
 
-        return
-
-    result = st.session_state.scan_result
-
+    if result is None:
+     return
     st.divider()
 
     st.subheader("AI Result")
