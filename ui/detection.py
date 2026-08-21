@@ -22,11 +22,9 @@ def show_detection():
     )
 
     if uploaded is None:
-
         st.info(
             "Upload an ultrasound image to begin."
         )
-
         return
 
     image = Image.open(uploaded)
@@ -52,22 +50,6 @@ def show_detection():
                 load_model()
                 result = predict(image)
 
-            # ==================================================
-            # SAVE SESSION RESULT
-            # ==================================================
-
-            st.session_state.prediction = (
-                result["prediction"]
-            )
-
-            st.session_state.history.append(
-                result
-            )
-
-            # ==================================================
-            # SAVE TO SUPABASE
-            # ==================================================
-
             supabase = get_supabase()
 
             user = supabase.auth.get_user()
@@ -75,12 +57,16 @@ def show_detection():
             if not user.user:
 
                 st.error(
-                    "Your login session has expired."
+                    "Please log in again."
                 )
 
                 return
 
             user_id = user.user.id
+
+            # ----------------------------------------------
+            # SAVE SCAN
+            # ----------------------------------------------
 
             response = (
                 supabase
@@ -95,12 +81,19 @@ def show_detection():
                 .execute()
             )
 
-            # Store database scan ID
-            if response.data:
+            scan_id = response.data[0]["id"]
 
-                st.session_state.scan_id = (
-                    response.data[0]["id"]
-                )
+            st.session_state.prediction = (
+                result["prediction"]
+            )
+
+            st.session_state.history.append(
+                result
+            )
+
+            st.session_state.scan_id = scan_id
+
+            st.session_state.scan_result = result
 
             st.success(
                 "Analysis completed."
@@ -117,112 +110,108 @@ def show_detection():
 
             return
 
-    # ==========================================================
-    # SHOW RESULT
-    # ==========================================================
+    # ========================================================
+    # RESULT
+    # ========================================================
 
-    if "prediction" not in st.session_state:
-
+    if "scan_result" not in st.session_state:
         return
 
-    result = st.session_state.history[-1]
+    result = st.session_state.scan_result
 
     st.divider()
 
     st.subheader(
-        "AI Analysis"
+        "AI Result"
     )
-
-    # ==========================================================
-    # MAIN RESULT
-    # ==========================================================
 
     col1, col2 = st.columns(2)
 
     with col1:
 
         st.metric(
-            "AI Finding",
-            result["prediction"],
+            "Finding",
+            result["prediction"]
         )
 
     with col2:
 
         st.metric(
             "Confidence",
-            f"{result['confidence']:.1%}",
+            f"{result['confidence']:.1%}"
         )
 
-    # ==========================================================
+    # ========================================================
     # PROBABILITIES
-    # ==========================================================
+    # ========================================================
 
     st.subheader(
         "Probability Breakdown"
     )
 
-    probabilities = result[
+    for name, value in result[
         "probabilities"
-    ]
-
-    for name, probability in probabilities.items():
+    ].items():
 
         st.write(
-            f"**{name} — {probability:.1%}**"
+            f"**{name}: {value:.1%}**"
         )
 
         st.progress(
-            min(max(probability, 0), 1)
+            min(max(value, 0), 1)
         )
-
-    st.caption(
-        "MammoSense provides AI-assisted screening "
-        "information and does not replace professional "
-        "medical evaluation."
-    )
 
     st.divider()
 
-    # ==========================================================
-    # RADIOLOGIST CONSULTATION
-    # ==========================================================
+    # ========================================================
+    # CONSULTATION
+    # ========================================================
 
     st.subheader(
-        "👨‍⚕️ Radiologist Review"
+        "👨‍⚕️ Radiologist Consultation"
     )
 
     st.write(
-        "Would you like a qualified radiologist "
-        "to review your scan?"
+        "Would you like a radiologist to review "
+        "your ultrasound result?"
     )
 
-    st.info(
-        "You can request a professional review "
-        "of your AI-assisted screening result."
+    call_type = st.selectbox(
+        "Consultation type",
+        [
+            "Video call",
+            "Voice call",
+        ]
+    )
+
+    preferred_date = st.date_input(
+        "Preferred date"
+    )
+
+    preferred_time = st.selectbox(
+        "Preferred time",
+        [
+            "09:00",
+            "10:00",
+            "11:00",
+            "12:00",
+            "14:00",
+            "15:00",
+            "16:00",
+        ]
     )
 
     if st.button(
-        "Request Radiologist Review",
+        "📞 Book Radiologist Consultation",
+        type="primary",
         use_container_width=True,
     ):
 
         try:
 
-            scan_id = st.session_state.get(
-                "scan_id"
-            )
+            supabase = get_supabase()
 
-            if not scan_id:
-
-                st.error(
-                    "Scan record not found."
-                )
-
-                return
-
-            user = (
-                supabase.auth.get_user()
-            )
+            user = supabase.auth.get_user()
 
             if not user.user:
 
@@ -234,53 +223,41 @@ def show_detection():
 
             user_id = user.user.id
 
-            # Check if request already exists
+            supabase.table(
+                "consultations"
+            ).insert({
+                "user_id": user_id,
+                "scan_id": st.session_state.scan_id,
+                "call_type": call_type,
+                "preferred_date": str(
+                    preferred_date
+                ),
+                "preferred_time": preferred_time,
+                "status": "Pending",
+            }).execute()
 
-            existing = (
-                supabase
-                .table(
-                    "radiologist_requests"
-                )
-                .select("*")
-                .eq(
-                    "scan_id",
-                    scan_id
-                )
-                .execute()
-                .data
+            st.success(
+                "✅ Consultation request submitted."
             )
 
-            if existing:
-
-                st.info(
-                    "Radiologist review has already "
-                    "been requested for this scan."
-                )
-
-            else:
-
-                supabase.table(
-                    "radiologist_requests"
-                ).insert({
-                    "user_id": user_id,
-                    "scan_id": scan_id,
-                    "status": "Pending",
-                }).execute()
-
-                st.success(
-                    "Radiologist review requested."
-                )
-
-                st.info(
-                    "Your request is now pending. "
-                    "A radiologist can review the scan "
-                    "and provide professional confirmation."
-                )
+            st.info(
+                "Your request is pending radiologist "
+                "review. You will be notified when "
+                "your consultation is confirmed."
+            )
 
         except Exception as error:
 
             st.error(
-                "Unable to request radiologist review."
+                "Unable to book consultation."
             )
 
             st.exception(error)
+
+    st.divider()
+
+    st.caption(
+        "MammoSense provides AI-assisted screening "
+        "information and does not replace professional "
+        "medical evaluation."
+    )
