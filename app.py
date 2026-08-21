@@ -7,6 +7,7 @@ from ui.health import show_health
 from ui.marketplace import show_marketplace
 from ui.profile import show_profile
 from ui.radiologist import show_radiologist
+from utils.supabase_client import get_supabase
 
 from ui.auth import (
     show_auth,
@@ -67,6 +68,31 @@ if "review_requested" not in st.session_state:
 
 if "prediction" not in st.session_state:
     st.session_state.prediction = None
+
+supabase = get_supabase()
+
+current_user = None
+is_radiologist = False
+
+if st.session_state.authenticated:
+
+    response = supabase.auth.get_user()
+
+    if response.user:
+
+        current_user = response.user
+
+        doctor = (
+            supabase
+            .table("radiologists")
+            .select("user_id, full_name")
+            .eq("user_id", current_user.id)
+            .eq("active", True)
+            .execute()
+            .data
+        )
+
+        is_radiologist = bool(doctor)
 
 
 # ============================================================
@@ -159,8 +185,10 @@ pages = [
     "Health",
     "Marketplace",
     "Profile",
-    "Radiologist",
 ]
+
+if is_radiologist:
+    pages.append("Radiologist")
 
 
 selected = st.radio(
