@@ -3,7 +3,7 @@ from PIL import Image
 
 from ui.background import set_background
 from ai.mammosense import get_mammosense
-
+from utils.supabase_client import get_supabase
 
 def show_detection():
 
