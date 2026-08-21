@@ -159,6 +159,7 @@ pages = [
     "Health",
     "Marketplace",
     "Profile",
+    "Radiologist",
 ]
 
 
