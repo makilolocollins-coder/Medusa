@@ -80,7 +80,7 @@ def show_radiologist():
         return
 
     # ========================================================
-    # FILTER PENDING
+    # FILTER REQUESTS
     # ========================================================
 
     pending_requests = [
@@ -108,19 +108,19 @@ def show_radiologist():
     with col1:
         st.metric(
             "Pending Reviews",
-            len(pending_requests),
+            len(pending_requests)
         )
 
     with col2:
         st.metric(
             "Reviewed",
-            len(reviewed_requests),
+            len(reviewed_requests)
         )
 
     with col3:
         st.metric(
             "Total Requests",
-            len(requests),
+            len(requests)
         )
 
     st.divider()
@@ -144,10 +144,6 @@ def show_radiologist():
             request_id = request.get("id")
             scan_id = request.get("scan_id")
 
-            # ------------------------------------------------
-            # GET SCAN INFORMATION
-            # ------------------------------------------------
-
             try:
 
                 scan = (
@@ -164,10 +160,6 @@ def show_radiologist():
 
                 scan = None
 
-            # ------------------------------------------------
-            # REQUEST CARD
-            # ------------------------------------------------
-
             with st.container(border=True):
 
                 st.markdown(
@@ -178,12 +170,12 @@ def show_radiologist():
 
                     prediction = scan.get(
                         "prediction",
-                        "Unknown",
+                        "Unknown"
                     )
 
                     confidence = scan.get(
                         "confidence",
-                        0,
+                        0
                     )
 
                     st.write(
@@ -203,7 +195,7 @@ def show_radiologist():
                 if st.button(
                     "🔎 Open Scan",
                     key=f"open_{request_id}",
-                    use_container_width=True,
+                    use_container_width=True
                 ):
 
                     st.session_state.selected_request = request
@@ -255,103 +247,90 @@ def show_radiologist():
 
     if not scan:
 
-    st.error(
-        "Scan information was not found."
-    )
-
-    return
-
-st.write("DEBUG - Scan loaded:", scan)
-st.write("DEBUG - Image path:", scan.get("image_path"))
-
-
-# ========================================================
-# LOAD ACTUAL ULTRASOUND
-# ========================================================
-
-image_path = scan.get(
-    "image_path"
-)
-
-st.subheader("🩻 Ultrasound Image")
-
-if image_path:
-
-    st.caption(
-        f"Image path: {image_path}"
-    )
-
-    try:
-
-        storage = supabase.storage.from_(
-            "mammosense-scans"
+        st.error(
+            "Scan information was not found."
         )
 
-        signed = storage.create_signed_url(
-            image_path,
-            3600,
-        )
+        return
 
-        # Supabase Python client can return
-        # different key formats depending on version
+    # ========================================================
+    # ULTRASOUND IMAGE
+    # ========================================================
 
-        if isinstance(signed, dict):
+    st.subheader("🩻 Ultrasound Image")
 
-            signed_url = (
-                signed.get("signedURL")
-                or signed.get("signedUrl")
-                or signed.get("signed_url")
+    image_path = scan.get(
+        "image_path"
+    )
+
+    if image_path:
+
+        try:
+
+            signed = (
+                supabase
+                .storage
+                .from_("mammosense-scans")
+                .create_signed_url(
+                    image_path,
+                    3600
+                )
             )
 
-        else:
+            signed_url = None
 
-            signed_url = getattr(
-                signed,
-                "signedURL",
-                None,
-            )
+            if isinstance(signed, dict):
 
-            if not signed_url:
+                signed_url = (
+                    signed.get("signedURL")
+                    or signed.get("signedUrl")
+                    or signed.get("signed_url")
+                )
+
+            else:
 
                 signed_url = getattr(
                     signed,
-                    "signedUrl",
-                    None,
+                    "signedURL",
+                    None
                 )
 
-        if signed_url:
+                if not signed_url:
 
-            st.image(
-                signed_url,
-                caption="Patient ultrasound",
-                use_container_width=True,
-            )
+                    signed_url = getattr(
+                        signed,
+                        "signedUrl",
+                        None
+                    )
 
-        else:
+            if signed_url:
+
+                st.image(
+                    signed_url,
+                    caption="Patient ultrasound",
+                    use_container_width=True
+                )
+
+            else:
+
+                st.error(
+                    "Unable to generate image URL."
+                )
+
+        except Exception as error:
 
             st.error(
-                "Supabase did not return "
-                "a signed image URL."
+                "Unable to load ultrasound image."
             )
 
-    except Exception as error:
+            st.exception(error)
 
-        st.error(
-            "Could not access the ultrasound image."
+    else:
+
+        st.warning(
+            "No ultrasound image is attached to this scan."
         )
 
-        st.exception(error)
-
-else:
-
-    st.warning(
-        "This scan does not have an image attached."
-    )
-
-    st.info(
-        "Only scans uploaded after image storage "
-        "was enabled will contain the original image."
-    )
     # ========================================================
     # AI RESULTS
     # ========================================================
@@ -368,20 +347,20 @@ else:
             "AI Finding",
             scan.get(
                 "prediction",
-                "Unknown",
-            ),
+                "Unknown"
+            )
         )
 
     with col2:
 
         confidence = scan.get(
             "confidence",
-            0,
+            0
         )
 
         st.metric(
             "AI Confidence",
-            f"{confidence:.1%}",
+            f"{confidence:.1%}"
         )
 
     # ========================================================
@@ -390,7 +369,7 @@ else:
 
     probabilities = scan.get(
         "probabilities",
-        {},
+        {}
     )
 
     if isinstance(probabilities, dict):
@@ -421,10 +400,9 @@ else:
         "Professional review note",
         height=180,
         placeholder=(
-            "Enter your professional interpretation "
-            "and recommendations..."
+            "Enter your professional review..."
         ),
-        key=f"review_note_{selected['id']}",
+        key=f"review_note_{selected['id']}"
     )
 
     # ========================================================
@@ -435,7 +413,7 @@ else:
         "✓ Mark as Reviewed",
         type="primary",
         use_container_width=True,
-        key=f"review_{selected['id']}",
+        key=f"review_{selected['id']}"
     ):
 
         if not note.strip():
@@ -455,10 +433,11 @@ else:
                     "status": "Reviewed",
                     "radiologist_id": radiologist_id,
                     "radiologist_note": note.strip(),
+                    "reviewed_at": "now()"
                 })
                 .eq(
                     "id",
-                    selected["id"],
+                    selected["id"]
                 )
                 .execute()
             )
@@ -469,7 +448,7 @@ else:
 
             st.session_state.pop(
                 "selected_request",
-                None,
+                None
             )
 
             st.rerun()
