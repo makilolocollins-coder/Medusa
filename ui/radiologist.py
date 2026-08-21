@@ -388,7 +388,22 @@ def show_radiologist():
                 float(value)
             )
 
-      # ========================================================
+    # ========================================================
+    # RADIOLOGIST REVIEW
+    # ========================================================
+
+    st.divider()
+
+    st.subheader("📝 Radiologist Review")
+
+    note = st.text_area(
+        "Professional review note",
+        height=180,
+        placeholder="Enter your professional review...",
+        key=f"review_note_{selected['id']}"
+    )
+
+    # ========================================================
     # MARK REVIEWED
     # ========================================================
 
@@ -405,7 +420,7 @@ def show_radiologist():
                 "Please enter a review note first."
             )
 
-            return
+            st.stop()
 
         try:
 
@@ -430,8 +445,7 @@ def show_radiologist():
             if not result.data:
 
                 st.error(
-                    "The review could not be saved. "
-                    "Supabase did not update the request."
+                    "The review could not be saved."
                 )
 
                 st.write(
@@ -439,7 +453,7 @@ def show_radiologist():
                     selected["id"]
                 )
 
-                return
+                st.stop()
 
             st.success(
                 "✅ Review saved successfully."
@@ -458,4 +472,4 @@ def show_radiologist():
                 "Could not save the radiologist review."
             )
 
-            st.exception(error)  
+            st.exception(error)
