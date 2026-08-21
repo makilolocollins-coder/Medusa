@@ -22,6 +22,10 @@ def show_health():
 
     user_id = user.user.id
 
+    # --------------------------------------------------------
+    # LOAD SCANS
+    # --------------------------------------------------------
+
     scans = (
         supabase
         .table("ai_scans")
@@ -33,13 +37,102 @@ def show_health():
         or []
     )
 
+    # --------------------------------------------------------
+    # LOAD RADIOLOGIST REVIEWS
+    # --------------------------------------------------------
+
+    try:
+
+        reviews = (
+            supabase
+            .table("radiologist_requests")
+            .select("*")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .execute()
+            .data
+            or []
+        )
+
+    except Exception as error:
+
+        st.error(
+            "Could not load radiologist reviews."
+        )
+
+        st.exception(error)
+
+        reviews = []
+
+    # --------------------------------------------------------
+    # REVIEW COUNTS
+    # --------------------------------------------------------
+
+    total_reviews = len(reviews)
+
+    pending_reviews = sum(
+        1
+        for review in reviews
+        if str(
+            review.get("status", "")
+        ).lower() == "pending"
+    )
+
+    reviewed_cases = sum(
+        1
+        for review in reviews
+        if str(
+            review.get("status", "")
+        ).lower() == "reviewed"
+    )
+
+    # --------------------------------------------------------
+    # PAGE HEADER
+    # --------------------------------------------------------
+
     st.title("❤️ Health Dashboard")
-    st.caption("Your personal AI health activity")
+    st.caption(
+        "Your personal AI health activity"
+    )
+
+    # --------------------------------------------------------
+    # NO SCANS
+    # --------------------------------------------------------
 
     if not scans:
+
         st.info(
             "No scans yet. Start with AI Detection."
         )
+
+        # Still show review statistics
+        # if review records exist.
+
+        if total_reviews > 0:
+
+            st.divider()
+
+            st.subheader(
+                "👨‍⚕️ Radiologist Reviews"
+            )
+
+            a, b, c = st.columns(3)
+
+            a.metric(
+                "Total Reviews",
+                total_reviews
+            )
+
+            b.metric(
+                "Pending",
+                pending_reviews
+            )
+
+            c.metric(
+                "Reviewed",
+                reviewed_cases
+            )
+
         return
 
     # --------------------------------------------------------
@@ -79,13 +172,13 @@ def show_health():
     )
 
     c.metric(
-        "Avg. Confidence",
-        f"{average_confidence:.1%}"
+        "Pending Reviews",
+        pending_reviews
     )
 
     d.metric(
-        "Most Frequent",
-        most_common
+        "Reviewed Cases",
+        reviewed_cases
     )
 
     st.divider()
@@ -131,66 +224,34 @@ def show_health():
 
     st.divider()
 
-    st.subheader("👨‍⚕️ Radiologist Reviews")
+    st.subheader(
+        "👨‍⚕️ Radiologist Reviews"
+    )
 
     st.caption(
         "Professional reviews and messages "
         "for your submitted scans."
     )
 
-    try:
-
-        reviews = (
-            supabase
-            .table("radiologist_requests")
-            .select("*")
-            .eq("user_id", user_id)
-            .order("created_at", desc=True)
-            .execute()
-            .data
-            or []
-        )
-
-    except Exception as error:
-
-        st.error(
-            "Could not load radiologist reviews."
-        )
-
-        st.exception(error)
-
-        reviews = []
-
     # --------------------------------------------------------
     # REVIEW SUMMARY
     # --------------------------------------------------------
 
-    pending_count = sum(
-        1
-        for review in reviews
-        if str(
-            review.get("status", "")
-        ).lower() == "pending"
-    )
-
-    reviewed_count = sum(
-        1
-        for review in reviews
-        if str(
-            review.get("status", "")
-        ).lower() == "reviewed"
-    )
-
-    r1, r2 = st.columns(2)
+    r1, r2, r3 = st.columns(3)
 
     r1.metric(
         "Reviews Requested",
-        len(reviews)
+        total_reviews
     )
 
     r2.metric(
-        "Reviews Completed",
-        reviewed_count
+        "Pending",
+        pending_reviews
+    )
+
+    r3.metric(
+        "Completed",
+        reviewed_cases
     )
 
     # --------------------------------------------------------
@@ -200,7 +261,8 @@ def show_health():
     if not reviews:
 
         st.info(
-            "You have not requested a radiologist review yet."
+            "You have not requested a radiologist "
+            "review yet."
         )
 
     else:
@@ -226,9 +288,16 @@ def show_health():
                 if scan.get("id") == scan_id:
 
                     associated_scan = scan
+
                     break
 
-            with st.container(border=True):
+            # -----------------------------------------------
+            # REVIEW CARD
+            # -----------------------------------------------
+
+            with st.container(
+                border=True
+            ):
 
                 if status == "reviewed":
 
@@ -236,10 +305,16 @@ def show_health():
                         "### ✅ Radiologist Review Completed"
                     )
 
-                else:
+                elif status == "pending":
 
                     st.markdown(
                         "### ⏳ Radiologist Review Pending"
+                    )
+
+                else:
+
+                    st.markdown(
+                        "### 📋 Radiologist Review"
                     )
 
                 # -------------------------------------------
@@ -274,7 +349,7 @@ def show_health():
                         )
 
                 # -------------------------------------------
-                # REVIEW STATUS
+                # PENDING
                 # -------------------------------------------
 
                 if status == "pending":
@@ -285,9 +360,13 @@ def show_health():
                     )
 
                     st.caption(
-                        "A professional review will "
-                        "appear here when completed."
+                        "The professional review will "
+                        "appear here once completed."
                     )
+
+                # -------------------------------------------
+                # REVIEWED
+                # -------------------------------------------
 
                 elif status == "reviewed":
 
