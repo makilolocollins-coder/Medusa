@@ -188,6 +188,7 @@ pages = [
 ]
 
 if is_radiologist:
+    st.write("Radiologist detected:", is_radiologist)
     pages.append("Radiologist")
 
 
