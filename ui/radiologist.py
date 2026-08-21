@@ -255,11 +255,15 @@ def show_radiologist():
 
     if not scan:
 
-        st.error(
-            "Scan information was not found."
-        )
+    st.error(
+        "Scan information was not found."
+    )
 
-        return
+    return
+
+st.write("DEBUG - Scan loaded:", scan)
+st.write("DEBUG - Image path:", scan.get("image_path"))
+
 
 # ========================================================
 # LOAD ACTUAL ULTRASOUND
