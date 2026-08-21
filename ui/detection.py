@@ -11,20 +11,16 @@ def show_detection():
     set_background("detection.jpg")
 
     st.title("🧬 MammoSense")
-
-    st.caption(
-        "AI-assisted breast ultrasound screening"
-    )
+    st.caption("AI-assisted breast ultrasound screening")
 
     uploaded = st.file_uploader(
         "Upload ultrasound image",
         type=["jpg", "jpeg", "png", "webp"],
+        key="mammosense_upload",
     )
 
     if uploaded is None:
-        st.info(
-            "Upload an ultrasound image to begin."
-        )
+        st.info("Upload an ultrasound image to begin.")
         return
 
     image = Image.open(uploaded)
@@ -35,6 +31,10 @@ def show_detection():
         use_container_width=True,
     )
 
+    # ========================================================
+    # ANALYSE
+    # ========================================================
+
     if st.button(
         "Analyse with MammoSense",
         type="primary",
@@ -43,9 +43,7 @@ def show_detection():
 
         try:
 
-            with st.spinner(
-                "Analysing ultrasound..."
-            ):
+            with st.spinner("Analysing ultrasound..."):
 
                 load_model()
                 result = predict(image)
@@ -55,24 +53,15 @@ def show_detection():
             user = supabase.auth.get_user()
 
             if not user.user:
-
-                st.error(
-                    "Please log in again."
-                )
-
+                st.error("Please log in again.")
                 return
 
-            user_id = user.user.id
-
-            # ----------------------------------------------
-            # SAVE SCAN
-            # ----------------------------------------------
-
+            # Save scan
             response = (
                 supabase
                 .table("ai_scans")
                 .insert({
-                    "user_id": user_id,
+                    "user_id": user.user.id,
                     "model": "MammoSense V2",
                     "prediction": result["prediction"],
                     "confidence": result["confidence"],
@@ -83,32 +72,21 @@ def show_detection():
 
             scan_id = response.data[0]["id"]
 
-            st.session_state.prediction = (
-                result["prediction"]
-            )
-
-            st.session_state.history.append(
-                result
-            )
-
+            # Save result in session
+            st.session_state.scan_result = result
             st.session_state.scan_id = scan_id
 
-            st.session_state.scan_result = result
+            if "history" not in st.session_state:
+                st.session_state.history = []
 
-            st.success(
-                "Analysis completed."
-            )
+            st.session_state.history.append(result)
+
+            st.success("Analysis completed.")
 
         except Exception as error:
 
-            st.error(
-                "MammoSense could not analyse "
-                "this image."
-            )
-
+            st.error("MammoSense could not analyse this image.")
             st.exception(error)
-
-            return
 
     # ========================================================
     # RESULT
@@ -121,37 +99,29 @@ def show_detection():
 
     st.divider()
 
-    st.subheader(
-        "AI Result"
-    )
+    st.subheader("AI Result")
 
     col1, col2 = st.columns(2)
 
     with col1:
-
         st.metric(
             "Finding",
-            result["prediction"]
+            result["prediction"],
         )
 
     with col2:
-
         st.metric(
             "Confidence",
-            f"{result['confidence']:.1%}"
+            f"{result['confidence']:.1%}",
         )
 
     # ========================================================
     # PROBABILITIES
     # ========================================================
 
-    st.subheader(
-        "Probability Breakdown"
-    )
+    st.subheader("Probability Breakdown")
 
-    for name, value in result[
-        "probabilities"
-    ].items():
+    for name, value in result["probabilities"].items():
 
         st.write(
             f"**{name}: {value:.1%}**"
@@ -164,16 +134,14 @@ def show_detection():
     st.divider()
 
     # ========================================================
-    # CONSULTATION
+    # RADIOLOGIST CONSULTATION
     # ========================================================
 
-    st.subheader(
-        "👨‍⚕️ Radiologist Consultation"
-    )
+    st.subheader("👨‍⚕️ Radiologist Consultation")
 
     st.write(
-        "Would you like a radiologist to review "
-        "your ultrasound result?"
+        "Would you like a qualified radiologist "
+        "to review your scan?"
     )
 
     call_type = st.selectbox(
@@ -181,11 +149,13 @@ def show_detection():
         [
             "Video call",
             "Voice call",
-        ]
+        ],
+        key="call_type",
     )
 
     preferred_date = st.date_input(
-        "Preferred date"
+        "Preferred date",
+        key="consultation_date",
     )
 
     preferred_time = st.selectbox(
@@ -198,13 +168,15 @@ def show_detection():
             "14:00",
             "15:00",
             "16:00",
-        ]
+        ],
+        key="consultation_time",
     )
 
     if st.button(
         "📞 Book Radiologist Consultation",
         type="primary",
         use_container_width=True,
+        key="book_consultation",
     ):
 
         try:
@@ -214,24 +186,26 @@ def show_detection():
             user = supabase.auth.get_user()
 
             if not user.user:
-
-                st.error(
-                    "Please log in again."
-                )
-
+                st.error("Please log in again.")
                 return
 
-            user_id = user.user.id
+            scan_id = st.session_state.get(
+                "scan_id"
+            )
+
+            if not scan_id:
+                st.error(
+                    "No scan was found for this consultation."
+                )
+                return
 
             supabase.table(
                 "consultations"
             ).insert({
-                "user_id": user_id,
-                "scan_id": st.session_state.scan_id,
+                "user_id": user.user.id,
+                "scan_id": scan_id,
                 "call_type": call_type,
-                "preferred_date": str(
-                    preferred_date
-                ),
+                "preferred_date": str(preferred_date),
                 "preferred_time": preferred_time,
                 "status": "Pending",
             }).execute()
@@ -241,10 +215,11 @@ def show_detection():
             )
 
             st.info(
-                "Your request is pending radiologist "
-                "review. You will be notified when "
-                "your consultation is confirmed."
+                "Your consultation is pending confirmation "
+                "by a radiologist."
             )
+
+            st.session_state.consultation_booked = True
 
         except Exception as error:
 
@@ -253,6 +228,24 @@ def show_detection():
             )
 
             st.exception(error)
+
+    # ========================================================
+    # STATUS
+    # ========================================================
+
+    if st.session_state.get(
+        "consultation_booked",
+        False
+    ):
+
+        st.success(
+            "📞 Consultation Status: Pending"
+        )
+
+        st.caption(
+            "A radiologist will review your request "
+            "and confirm the consultation."
+        )
 
     st.divider()
 
