@@ -57,8 +57,34 @@ def show_detection():
             if not user.user:
 
                 st.error("Please log in again.")
-
                 return
+
+            user_id = user.user.id
+
+            # ------------------------------------------------
+            # SAVE IMAGE TO SUPABASE STORAGE
+            # ------------------------------------------------
+
+            file_extension = uploaded.name.split(".")[-1]
+
+            image_path = (
+                f"{user_id}/"
+                f"{__import__('uuid').uuid4()}."
+                f"{file_extension}"
+            )
+
+            image_bytes = uploaded.getvalue()
+
+            supabase.storage.from_(
+                "mammosense-scans"
+            ).upload(
+                image_path,
+                image_bytes,
+                {
+                    "content-type": uploaded.type,
+                    "upsert": "false",
+                },
+            )
 
             # ------------------------------------------------
             # SAVE SCAN
@@ -68,11 +94,12 @@ def show_detection():
                 supabase
                 .table("ai_scans")
                 .insert({
-                    "user_id": user.user.id,
+                    "user_id": user_id,
                     "model": "MammoSense V2",
                     "prediction": result["prediction"],
                     "confidence": result["confidence"],
                     "probabilities": result["probabilities"],
+                    "image_path": image_path,
                 })
                 .execute()
             )
@@ -85,6 +112,7 @@ def show_detection():
 
             st.session_state.scan_result = result
             st.session_state.scan_id = scan_id
+            st.session_state.image_path = image_path
 
             if "history" not in st.session_state:
                 st.session_state.history = []
@@ -108,7 +136,8 @@ def show_detection():
     result = st.session_state.get("scan_result")
 
     if result is None:
-     return
+        return
+
     st.divider()
 
     st.subheader("AI Result")
@@ -174,12 +203,9 @@ def show_detection():
             if not user.user:
 
                 st.error("Please log in again.")
-
                 return
 
-            scan_id = st.session_state.get(
-                "scan_id"
-            )
+            scan_id = st.session_state.get("scan_id")
 
             if not scan_id:
 
@@ -189,29 +215,19 @@ def show_detection():
 
                 return
 
-            # Check existing request
-
             existing = (
                 supabase
                 .table("radiologist_requests")
                 .select("id,status")
-                .eq(
-                    "scan_id",
-                    scan_id
-                )
-                .eq(
-                    "user_id",
-                    user.user.id
-                )
+                .eq("scan_id", scan_id)
+                .eq("user_id", user.user.id)
                 .execute()
                 .data
             )
 
             if existing:
 
-                st.info(
-                    "Review already requested."
-                )
+                st.info("Review already requested.")
 
                 st.caption(
                     f"Status: {existing[0]['status']}"
@@ -250,9 +266,7 @@ def show_detection():
     # CONSULTATION
     # ========================================================
 
-    st.subheader(
-        "📞 Book a Consultation"
-    )
+    st.subheader("📞 Book a Consultation")
 
     st.write(
         "Speak with a radiologist about your scan."
@@ -302,12 +316,9 @@ def show_detection():
             if not user.user:
 
                 st.error("Please log in again.")
-
                 return
 
-            scan_id = st.session_state.get(
-                "scan_id"
-            )
+            scan_id = st.session_state.get("scan_id")
 
             if not scan_id:
 
@@ -324,9 +335,7 @@ def show_detection():
                 "user_id": user.user.id,
                 "scan_id": scan_id,
                 "call_type": call_type,
-                "preferred_date": str(
-                    preferred_date
-                ),
+                "preferred_date": str(preferred_date),
                 "preferred_time": preferred_time,
                 "status": "Pending",
             }).execute()
@@ -347,10 +356,6 @@ def show_detection():
             )
 
             st.exception(error)
-
-    # ========================================================
-    # DISCLAIMER
-    # ========================================================
 
     st.divider()
 
