@@ -100,27 +100,24 @@ def show_radiologist():
     ]
 
     # ========================================================
-    # DASHBOARD METRICS
+    # DASHBOARD
     # ========================================================
 
     col1, col2, col3 = st.columns(3)
 
     with col1:
-
         st.metric(
             "Pending Reviews",
             len(pending_requests),
         )
 
     with col2:
-
         st.metric(
             "Reviewed",
             len(reviewed_requests),
         )
 
     with col3:
-
         st.metric(
             "Total Requests",
             len(requests),
@@ -129,8 +126,10 @@ def show_radiologist():
     st.divider()
 
     # ========================================================
-    # NO REQUESTS
+    # PENDING REVIEWS
     # ========================================================
+
+    st.subheader("📋 Pending Reviews")
 
     if not pending_requests:
 
@@ -138,94 +137,81 @@ def show_radiologist():
             "No pending radiologist reviews."
         )
 
-        return
+    else:
+
+        for request in pending_requests:
+
+            request_id = request.get("id")
+            scan_id = request.get("scan_id")
+
+            # ------------------------------------------------
+            # GET SCAN INFORMATION
+            # ------------------------------------------------
+
+            try:
+
+                scan = (
+                    supabase
+                    .table("ai_scans")
+                    .select("*")
+                    .eq("id", scan_id)
+                    .single()
+                    .execute()
+                    .data
+                )
+
+            except Exception:
+
+                scan = None
+
+            # ------------------------------------------------
+            # REQUEST CARD
+            # ------------------------------------------------
+
+            with st.container(border=True):
+
+                st.markdown(
+                    "### 🧬 MammoSense Scan"
+                )
+
+                if scan:
+
+                    prediction = scan.get(
+                        "prediction",
+                        "Unknown",
+                    )
+
+                    confidence = scan.get(
+                        "confidence",
+                        0,
+                    )
+
+                    st.write(
+                        f"**AI Finding:** {prediction}"
+                    )
+
+                    st.write(
+                        f"**AI Confidence:** "
+                        f"{confidence:.1%}"
+                    )
+
+                st.caption(
+                    f"Submitted: "
+                    f"{request.get('created_at', 'Unknown')}"
+                )
+
+                if st.button(
+                    "🔎 Open Scan",
+                    key=f"open_{request_id}",
+                    use_container_width=True,
+                ):
+
+                    st.session_state.selected_request = request
+
+                    st.rerun()
 
     # ========================================================
-    # PENDING REVIEWS
-    # ========================================================
-
-    st.subheader("📋 Pending Reviews")
-
-    for request in pending_requests:
-
-        request_id = request.get("id")
-        scan_id = request.get("scan_id")
-        created_at = request.get("created_at")
-
-        # ----------------------------------------------------
-        # GET SCAN
-        # ----------------------------------------------------
-
-        try:
-
-            scan_response = (
-                supabase
-                .table("ai_scans")
-                .select("*")
-                .eq("id", scan_id)
-                .single()
-                .execute()
-            )
-
-            scan = scan_response.data
-
-        except Exception:
-
-            scan = None
-
-        # ----------------------------------------------------
-        # CARD
-        # ----------------------------------------------------
-
-        with st.container(border=True):
-
-            st.markdown(
-                "### 🧬 MammoSense Review"
-            )
-
-            if scan:
-
-                prediction = scan.get(
-                    "prediction",
-                    "Unknown",
-                )
-
-                confidence = scan.get(
-                    "confidence",
-                    0,
-                )
-
-                st.write(
-                    f"**AI Finding:** {prediction}"
-                )
-
-                st.write(
-                    f"**AI Confidence:** "
-                    f"{confidence:.1%}"
-                )
-
-            else:
-
-                st.warning(
-                    "The associated scan could not be loaded."
-                )
-
-            st.caption(
-                f"Submitted: {created_at}"
-            )
-
-            if st.button(
-                "Open Scan",
-                key=f"open_{request_id}",
-                use_container_width=True,
-            ):
-
-                st.session_state.selected_request = request
-
-                st.rerun()
-
-    # ========================================================
-    # SELECTED REQUEST
+    # SELECTED SCAN
     # ========================================================
 
     selected = st.session_state.get(
@@ -237,11 +223,15 @@ def show_radiologist():
 
     st.divider()
 
-    st.subheader("🔎 Scan Review")
+    st.subheader("🔬 Scan Review")
 
     selected_scan_id = selected.get(
         "scan_id"
     )
+
+    # ========================================================
+    # LOAD SCAN
+    # ========================================================
 
     try:
 
@@ -272,8 +262,79 @@ def show_radiologist():
         return
 
     # ========================================================
-    # RESULTS
+    # LOAD ACTUAL ULTRASOUND
     # ========================================================
+
+    image_path = scan.get(
+        "image_path"
+    )
+
+    st.subheader("🩻 Ultrasound Image")
+
+    if image_path:
+
+        try:
+
+            signed_url_response = (
+                supabase
+                .storage
+                .from_("mammosense-scans")
+                .create_signed_url(
+                    image_path,
+                    3600,
+                )
+            )
+
+            signed_url = signed_url_response.get(
+                "signedURL"
+            )
+
+            if not signed_url:
+
+                signed_url = signed_url_response.get(
+                    "signedUrl"
+                )
+
+            if signed_url:
+
+                st.image(
+                    signed_url,
+                    caption="Patient ultrasound",
+                    use_container_width=True,
+                )
+
+            else:
+
+                st.warning(
+                    "Could not generate a secure image URL."
+                )
+
+        except Exception as error:
+
+            st.error(
+                "Could not load the ultrasound image."
+            )
+
+            st.exception(error)
+
+    else:
+
+        st.warning(
+            "This scan does not have an image attached."
+        )
+
+        st.info(
+            "Only scans uploaded after image storage "
+            "was enabled will contain the original image."
+        )
+
+    # ========================================================
+    # AI RESULTS
+    # ========================================================
+
+    st.divider()
+
+    st.subheader("🤖 MammoSense Analysis")
 
     col1, col2 = st.columns(2)
 
@@ -303,10 +364,6 @@ def show_radiologist():
     # PROBABILITIES
     # ========================================================
 
-    st.subheader(
-        "AI Probability Breakdown"
-    )
-
     probabilities = scan.get(
         "probabilities",
         {},
@@ -314,10 +371,14 @@ def show_radiologist():
 
     if isinstance(probabilities, dict):
 
+        st.subheader(
+            "Probability Breakdown"
+        )
+
         for name, value in probabilities.items():
 
             st.write(
-                f"**{name}** — {value:.1%}"
+                f"**{name}: {value:.1%}**"
             )
 
             st.progress(
@@ -325,12 +386,12 @@ def show_radiologist():
             )
 
     # ========================================================
-    # RADIOLOGIST NOTE
+    # RADIOLOGIST REVIEW
     # ========================================================
 
-    st.subheader(
-        "Radiologist Review"
-    )
+    st.divider()
+
+    st.subheader("📝 Radiologist Review")
 
     note = st.text_area(
         "Professional review note",
@@ -339,7 +400,7 @@ def show_radiologist():
             "Enter your professional interpretation "
             "and recommendations..."
         ),
-        key=f"note_{selected['id']}",
+        key=f"review_note_{selected['id']}",
     )
 
     # ========================================================
@@ -350,6 +411,7 @@ def show_radiologist():
         "✓ Mark as Reviewed",
         type="primary",
         use_container_width=True,
+        key=f"review_{selected['id']}",
     ):
 
         if not note.strip():
@@ -365,13 +427,11 @@ def show_radiologist():
             (
                 supabase
                 .table("radiologist_requests")
-                .update(
-                    {
-                        "status": "Reviewed",
-                        "radiologist_id": radiologist_id,
-                        "radiologist_note": note.strip(),
-                    }
-                )
+                .update({
+                    "status": "Reviewed",
+                    "radiologist_id": radiologist_id,
+                    "radiologist_note": note.strip(),
+                })
                 .eq(
                     "id",
                     selected["id"],
@@ -380,7 +440,7 @@ def show_radiologist():
             )
 
             st.success(
-                "Radiologist review completed."
+                "✅ Review completed successfully."
             )
 
             st.session_state.pop(
@@ -393,5 +453,7 @@ def show_radiologist():
         except Exception as error:
 
             st.error(
-                f"Could not save review: {error}"
-        )
+                "Could not save the radiologist review."
+            )
+
+            st.exception(error)
