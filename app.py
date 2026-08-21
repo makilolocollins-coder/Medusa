@@ -202,6 +202,9 @@ elif st.session_state.page == "Profile":
 
     show_profile()
 
+elif st.session_state.page == "Radiologist":
+
+    show_radiologist()
 
 # ============================================================
 # FOOTER
