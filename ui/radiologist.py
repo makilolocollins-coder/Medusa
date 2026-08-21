@@ -388,24 +388,7 @@ def show_radiologist():
                 float(value)
             )
 
-    # ========================================================
-    # RADIOLOGIST REVIEW
-    # ========================================================
-
-    st.divider()
-
-    st.subheader("📝 Radiologist Review")
-
-    note = st.text_area(
-        "Professional review note",
-        height=180,
-        placeholder=(
-            "Enter your professional review..."
-        ),
-        key=f"review_note_{selected['id']}"
-    )
-
-    # ========================================================
+      # ========================================================
     # MARK REVIEWED
     # ========================================================
 
@@ -426,42 +409,41 @@ def show_radiologist():
 
         try:
 
-            (
-                result = (
-    supabase
-    .table("radiologist_requests")
-    .update({
-        "status": "Reviewed",
-        "radiologist_id": radiologist_id,
-        "radiologist_note": note.strip(),
-        "reviewed_at": datetime.now(
-            timezone.utc
-        ).isoformat(),
-    })
-    .eq(
-        "id",
-        selected["id"]
-    )
-    .execute()
-)
+            result = (
+                supabase
+                .table("radiologist_requests")
+                .update({
+                    "status": "Reviewed",
+                    "radiologist_id": radiologist_id,
+                    "radiologist_note": note.strip(),
+                    "reviewed_at": datetime.now(
+                        timezone.utc
+                    ).isoformat(),
+                })
+                .eq(
+                    "id",
+                    selected["id"]
+                )
+                .execute()
+            )
 
-if not result.data:
+            if not result.data:
 
-    st.error(
-        "The review could not be saved. "
-        "Supabase did not update the request."
-    )
+                st.error(
+                    "The review could not be saved. "
+                    "Supabase did not update the request."
+                )
 
-    st.write(
-        "Request ID:",
-        selected["id"]
-    )
+                st.write(
+                    "Request ID:",
+                    selected["id"]
+                )
 
-    return
+                return
 
-st.success(
-    "✅ Review saved successfully."
-)
+            st.success(
+                "✅ Review saved successfully."
+            )
 
             st.session_state.pop(
                 "selected_request",
@@ -476,4 +458,4 @@ st.success(
                 "Could not save the radiologist review."
             )
 
-            st.exception(error)
+            st.exception(error)  
