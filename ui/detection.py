@@ -2,8 +2,9 @@ import streamlit as st
 from PIL import Image
 
 from ui.background import set_background
-from ai.mammosense import get_mammosense
+from ai.mammosense import load_model, predict
 from utils.supabase_client import get_supabase
+
 
 def show_detection():
 
@@ -20,17 +21,23 @@ def show_detection():
 
     uploaded = st.file_uploader(
         "Upload ultrasound image",
-        type=["jpg", "jpeg", "png", "webp"],
+        type=[
+            "jpg",
+            "jpeg",
+            "png",
+            "webp",
+        ],
     )
 
     if uploaded is None:
+
         st.info(
-            "Upload a breast ultrasound image "
-            "to begin analysis."
+            "Upload an ultrasound image to begin."
         )
+
         return
 
-    image = Image.open(uploaded).convert("RGB")
+    image = Image.open(uploaded)
 
     st.image(
         image,
@@ -41,74 +48,132 @@ def show_detection():
     st.divider()
 
     if st.button(
-        "🔬 Analyse with MammoSense",
+        "Analyse with MammoSense",
         type="primary",
         use_container_width=True,
     ):
 
         try:
 
-            with st.spinner("Loading MammoSense AI..."):
-                engine = get_mammosense()
+            # ==================================================
+            # RUN MODEL
+            # ==================================================
 
-            with st.spinner("Analysing ultrasound..."):
-                result = engine.predict(image)
+            with st.spinner(
+                "Loading MammoSense..."
+            ):
 
-            st.success("Analysis complete.")
+                load_model()
 
-            st.subheader("MammoSense Result")
+            with st.spinner(
+                "Analysing ultrasound..."
+            ):
 
-            prediction = result["prediction"]
-            confidence = result["confidence"]
+                result = predict(image)
+
+            # ==================================================
+            # RESULT
+            # ==================================================
+
+            st.success(
+                "Analysis complete."
+            )
+
+            st.subheader(
+                "AI Result"
+            )
 
             st.metric(
-                "AI Classification",
-                prediction,
+                "Finding",
+                result["prediction"],
             )
 
-            st.write(
-                f"Confidence: **{confidence * 100:.2f}%**"
+            st.metric(
+                "Confidence",
+                f"{result['confidence']:.2%}",
             )
 
-            st.progress(confidence)
+            # ==================================================
+            # PROBABILITIES
+            # ==================================================
 
-            st.subheader("Class Probabilities")
+            st.subheader(
+                "Class Probabilities"
+            )
 
             for name, probability in result[
                 "probabilities"
             ].items():
 
                 st.write(
-                    f"**{name}:** "
-                    f"{probability * 100:.2f}%"
+                    f"**{name}**: "
+                    f"{probability:.2%}"
                 )
 
-                st.progress(probability)
+            # ==================================================
+            # SESSION HISTORY
+            # ==================================================
 
-            with st.expander("Model information"):
+            st.session_state.prediction = (
+                result["prediction"]
+            )
 
-                st.write(
-                    f"**Model:** {result['model']}"
+            st.session_state.history.append(
+                result
+            )
+
+            # ==================================================
+            # SUPABASE
+            # ==================================================
+
+            supabase = get_supabase()
+
+            user_response = (
+                supabase.auth.get_user()
+            )
+
+            if not user_response.user:
+
+                st.warning(
+                    "No authenticated user found. "
+                    "The scan was not saved."
                 )
 
-                st.write(
-                    f"**Architecture:** "
-                    f"{result['architecture']}"
-                )
+                return
 
-                st.write(
-                    f"**Device:** {result['device']}"
-                )
+            user_id = user_response.user.id
 
-            st.warning(
-                "AI-assisted screening only. "
-                "This is not a medical diagnosis."
+            # ==================================================
+            # SAVE SCAN
+            # ==================================================
+
+            supabase.table(
+                "ai_scans"
+            ).insert(
+                {
+                    "user_id": user_id,
+
+                    "model": "MammoSense V2",
+
+                    "prediction":
+                        result["prediction"],
+
+                    "confidence":
+                        result["confidence"],
+
+                    "probabilities":
+                        result["probabilities"],
+                }
+            ).execute()
+
+            st.success(
+                "✅ Scan saved to your Health history."
             )
 
         except Exception as error:
 
             st.error(
-                "MammoSense could not analyse this image."
+                "MammoSense analysis failed."
             )
 
             st.exception(error)
