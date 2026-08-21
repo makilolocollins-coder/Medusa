@@ -9,154 +9,69 @@ def show_radiologist():
     set_background("radiologist.jpg")
 
     st.title("👨‍⚕️ Radiologist Portal")
-
-    st.caption(
-        "MammoSense professional review workspace"
-    )
+    st.caption("MammoSense professional review")
 
     supabase = get_supabase()
 
-    # ========================================================
-    # AUTHENTICATION
-    # ========================================================
+    user = supabase.auth.get_user()
 
-    user_response = supabase.auth.get_user()
-
-    if not user_response.user:
-
-        st.error(
-            "You must be logged in."
-        )
-
+    if not user.user:
+        st.error("Please log in.")
         return
 
-    radiologist_id = user_response.user.id
+    radiologist_id = user.user.id
 
-    # ========================================================
-    # CHECK RADIOLOGIST
-    # ========================================================
-
-    try:
-
-        doctor = (
-            supabase
-            .table("radiologists")
-            .select("*")
-            .eq(
-                "user_id",
-                radiologist_id
-            )
-            .eq(
-                "active",
-                True
-            )
-            .execute()
-            .data
-        )
-
-    except Exception as error:
-
-        st.error(
-            "Unable to verify radiologist account."
-        )
-
-        st.exception(error)
-
-        return
+    # Check authorization
+    doctor = (
+        supabase
+        .table("radiologists")
+        .select("*")
+        .eq("user_id", radiologist_id)
+        .eq("active", True)
+        .execute()
+        .data
+    )
 
     if not doctor:
-
         st.error(
             "This account is not authorized "
             "as a radiologist."
         )
-
         return
 
-    # ========================================================
-    # LOAD PENDING REQUESTS
-    # ========================================================
+    # Get pending requests
+    requests = (
+        supabase
+        .table("radiologist_requests")
+        .select("*")
+        .eq("status", "Pending")
+        .order("created_at", desc=True)
+        .execute()
+        .data
+        or []
+    )
 
-    try:
-
-        requests = (
-            supabase
-            .table("radiologist_requests")
-            .select(
-                "id, user_id, scan_id, status, "
-                "created_at"
-            )
-            .eq(
-                "status",
-                "Pending"
-            )
-            .order(
-                "created_at",
-                desc=True
-            )
-            .execute()
-            .data
-            or []
-        )
-
-    except Exception as error:
-
-        st.error(
-            "Unable to load consultation requests."
-        )
-
-        st.exception(error)
-
-        return
-
-    # ========================================================
-    # DASHBOARD
-    # ========================================================
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-
-        st.metric(
-            "Pending Reviews",
-            len(requests)
-        )
-
-    with col2:
-
-        st.metric(
-            "Status",
-            "Online"
-        )
+    st.metric(
+        "Pending Reviews",
+        len(requests)
+    )
 
     st.divider()
 
     if not requests:
-
         st.success(
             "No pending radiologist reviews."
         )
-
         return
 
-    # ========================================================
-    # REQUESTS
-    # ========================================================
-
-    st.subheader(
-        "Pending Reviews"
-    )
+    st.subheader("Pending Reviews")
 
     for request in requests:
 
         with st.container(border=True):
 
             st.write(
-                f"### Review Request"
-            )
-
-            st.caption(
-                f"Request ID: {request['id']}"
+                "🧬 MammoSense Scan"
             )
 
             st.caption(
@@ -166,140 +81,63 @@ def show_radiologist():
 
             if st.button(
                 "Open Scan",
-                key=f"open_{request['id']}",
-                use_container_width=True
+                key=f"open_{request['id']}"
             ):
 
-                st.session_state[
-                    "selected_request"
-                ] = request
-
+                st.session_state.selected_request = request
                 st.rerun()
 
-    # ========================================================
-    # SELECTED REQUEST
-    # ========================================================
-
+    # Selected scan
     selected = st.session_state.get(
         "selected_request"
     )
 
     if not selected:
-
         return
 
     st.divider()
 
-    st.subheader(
-        "🔍 Scan Review"
+    st.subheader("Scan Review")
+
+    scan = (
+        supabase
+        .table("ai_scans")
+        .select("*")
+        .eq("id", selected["scan_id"])
+        .single()
+        .execute()
+        .data
     )
 
-    scan_id = selected["scan_id"]
-
-    # ========================================================
-    # LOAD SCAN
-    # ========================================================
-
-    try:
-
-        scan_response = (
-            supabase
-            .table("ai_scans")
-            .select("*")
-            .eq(
-                "id",
-                scan_id
-            )
-            .single()
-            .execute()
-        )
-
-        scan = scan_response.data
-
-    except Exception as error:
-
-        st.error(
-            "Unable to load scan."
-        )
-
-        st.exception(error)
-
-        return
-
-    # ========================================================
-    # AI RESULT
-    # ========================================================
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-
-        st.metric(
-            "AI Finding",
-            scan.get(
-                "prediction",
-                "Unknown"
-            )
-        )
-
-    with col2:
-
-        confidence = scan.get(
-            "confidence",
-            0
-        )
-
-        st.metric(
-            "AI Confidence",
-            f"{confidence:.1%}"
-        )
-
-    # ========================================================
-    # PROBABILITIES
-    # ========================================================
-
-    probabilities = scan.get(
-        "probabilities",
-        {}
+    st.metric(
+        "AI Finding",
+        scan["prediction"]
     )
 
-    if probabilities:
-
-        st.subheader(
-            "AI Probability Breakdown"
-        )
-
-        for name, value in probabilities.items():
-
-            st.write(
-                f"**{name}: {value:.1%}**"
-            )
-
-            st.progress(
-                min(max(value, 0), 1)
-            )
-
-    # ========================================================
-    # RADIOLOGIST NOTE
-    # ========================================================
+    st.metric(
+        "AI Confidence",
+        f"{scan['confidence']:.1%}"
+    )
 
     st.subheader(
-        "Professional Review"
+        "AI Probabilities"
     )
+
+    for name, value in scan[
+        "probabilities"
+    ].items():
+
+        st.write(
+            f"{name}: {value:.1%}"
+        )
+
+        st.progress(value)
 
     note = st.text_area(
-        "Radiologist note",
-        placeholder=(
-            "Enter your professional observations "
-            "and review..."
-        ),
-        height=180,
-        key=f"note_{scan_id}"
+        "Radiologist Review",
+        height=150,
+        placeholder="Enter your professional review..."
     )
-
-    # ========================================================
-    # MARK REVIEWED
-    # ========================================================
 
     if st.button(
         "✓ Mark as Reviewed",
@@ -315,38 +153,22 @@ def show_radiologist():
 
             return
 
-        try:
+        supabase.table(
+            "radiologist_requests"
+        ).update({
+            "status": "Reviewed",
+            "radiologist_id": radiologist_id,
+            "radiologist_note": note,
+            "reviewed_at": "now()"
+        }).eq(
+            "id",
+            selected["id"]
+        ).execute()
 
-            (
-                supabase
-                .table("radiologist_requests")
-                .update({
-                    "status": "Reviewed",
-                    "radiologist_id": radiologist_id,
-                    "radiologist_note": note,
-                    "reviewed_at": "now()"
-                })
-                .eq(
-                    "id",
-                    selected["id"]
-                )
-                .execute()
-            )
+        st.success(
+            "Review completed."
+        )
 
-            st.success(
-                "Review completed successfully."
-            )
+        del st.session_state.selected_request
 
-            del st.session_state[
-                "selected_request"
-            ]
-
-            st.rerun()
-
-        except Exception as error:
-
-            st.error(
-                "Unable to complete review."
-            )
-
-            st.exception(error)
+        st.rerun()
