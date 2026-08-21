@@ -9,22 +9,24 @@ def show_health():
 
     set_background("health.jpg")
 
-    # --------------------------------------------------------
-    # LOAD DATA
-    # --------------------------------------------------------
-
     supabase = get_supabase()
-    user = supabase.auth.get_user()
 
-    if not user.user:
+    # ========================================================
+    # AUTHENTICATION
+    # ========================================================
+
+    response = supabase.auth.get_user()
+
+    if not response.user:
+
         st.warning("Please log in.")
         return
 
-    user_id = user.user.id
+    user_id = response.user.id
 
-    # --------------------------------------------------------
+    # ========================================================
     # LOAD SCANS
-    # --------------------------------------------------------
+    # ========================================================
 
     scans = (
         supabase
@@ -37,291 +39,196 @@ def show_health():
         or []
     )
 
-    # --------------------------------------------------------
-    # LOAD RADIOLOGIST REVIEWS
-    # --------------------------------------------------------
+    # ========================================================
+    # LOAD RADIOLOGIST REQUESTS
+    # ========================================================
 
-    try:
-
-        reviews = (
-            supabase
-            .table("radiologist_requests")
-            .select("*")
-            .eq("user_id", user_id)
-            .order("created_at", desc=True)
-            .execute()
-            .data
-            or []
-        )
-
-    except Exception as error:
-
-        st.error(
-            "Could not load radiologist reviews."
-        )
-
-        st.exception(error)
-
-        reviews = []
-
-    # --------------------------------------------------------
-    # REVIEW COUNTS
-    # --------------------------------------------------------
-
-    total_reviews = len(reviews)
-
-    pending_reviews = sum(
-        1
-        for review in reviews
-        if str(
-            review.get("status", "")
-        ).lower() == "pending"
+    reviews = (
+        supabase
+        .table("radiologist_requests")
+        .select("*")
+        .eq("user_id", user_id)
+        .order("created_at", desc=True)
+        .execute()
+        .data
+        or []
     )
 
-    reviewed_cases = sum(
-        1
-        for review in reviews
-        if str(
-            review.get("status", "")
-        ).lower() == "reviewed"
-    )
-
-    # --------------------------------------------------------
+    # ========================================================
     # PAGE HEADER
-    # --------------------------------------------------------
+    # ========================================================
 
     st.title("❤️ Health Dashboard")
+
     st.caption(
-        "Your personal AI health activity"
+        "Your MammoSense screening activity and "
+        "professional review status"
     )
 
-    # --------------------------------------------------------
-    # NO SCANS
-    # --------------------------------------------------------
+    # ========================================================
+    # CALCULATE STATUS
+    # ========================================================
+
+    analyzed_count = len(scans)
+
+    pending_reviews = [
+        r for r in reviews
+        if str(
+            r.get("status", "")
+        ).lower() == "pending"
+    ]
+
+    reviewed_reviews = [
+        r for r in reviews
+        if str(
+            r.get("status", "")
+        ).lower() == "reviewed"
+    ]
+
+    pending_count = len(
+        pending_reviews
+    )
+
+    reviewed_count = len(
+        reviewed_reviews
+    )
+
+    # ========================================================
+    # TOP STATUS CARDS
+    # ========================================================
+
+    st.subheader("Screening Overview")
+
+    c1, c2, c3 = st.columns(3)
+
+    with c1:
+
+        st.metric(
+            "🧬 Analyzed",
+            analyzed_count
+        )
+
+        st.caption(
+            "AI scans completed"
+        )
+
+    with c2:
+
+        st.metric(
+            "⏳ Pending",
+            pending_count
+        )
+
+        st.caption(
+            "Waiting for radiologist"
+        )
+
+    with c3:
+
+        st.metric(
+            "✅ Reviewed",
+            reviewed_count
+        )
+
+        st.caption(
+            "Professionally reviewed"
+        )
+
+    st.divider()
+
+    # ========================================================
+    # ANALYZED
+    # ========================================================
+
+    st.subheader("🧬 Analyzed")
 
     if not scans:
 
         st.info(
-            "No scans yet. Start with AI Detection."
+            "No scans have been analyzed yet."
         )
 
-        # Still show review statistics
-        # if review records exist.
+    else:
 
-        if total_reviews > 0:
+        df = pd.DataFrame(scans)
 
-            st.divider()
+        total = len(df)
 
-            st.subheader(
-                "👨‍⚕️ Radiologist Reviews"
-            )
-
-            a, b, c = st.columns(3)
-
-            a.metric(
-                "Total Reviews",
-                total_reviews
-            )
-
-            b.metric(
-                "Pending",
-                pending_reviews
-            )
-
-            c.metric(
-                "Reviewed",
-                reviewed_cases
-            )
-
-        return
-
-    # --------------------------------------------------------
-    # DATA
-    # --------------------------------------------------------
-
-    df = pd.DataFrame(scans)
-
-    total = len(df)
-
-    latest = df.iloc[0]
-
-    average_confidence = df[
-        "confidence"
-    ].mean()
-
-    most_common = (
-        df["prediction"]
-        .value_counts()
-        .idxmax()
-    )
-
-    # --------------------------------------------------------
-    # KPI CARDS
-    # --------------------------------------------------------
-
-    a, b, c, d = st.columns(4)
-
-    a.metric(
-        "Total Scans",
-        total
-    )
-
-    b.metric(
-        "Latest Result",
-        latest["prediction"]
-    )
-
-    c.metric(
-        "Pending Reviews",
-        pending_reviews
-    )
-
-    d.metric(
-        "Reviewed Cases",
-        reviewed_cases
-    )
-
-    st.divider()
-
-    # --------------------------------------------------------
-    # CHART + LATEST RESULT
-    # --------------------------------------------------------
-
-    left, right = st.columns(2)
-
-    with left:
-
-        st.subheader("Findings")
-
-        counts = (
-            df["prediction"]
-            .value_counts()
+        average_confidence = (
+            df["confidence"].mean()
         )
 
-        st.bar_chart(counts)
+        latest = df.iloc[0]
 
-    with right:
+        col1, col2, col3 = st.columns(3)
 
-        st.subheader("Latest Analysis")
+        with col1:
 
-        st.metric(
-            "Finding",
-            latest["prediction"]
-        )
+            st.metric(
+                "Total Scans",
+                total
+            )
 
-        st.metric(
-            "Confidence",
-            f"{latest['confidence']:.1%}"
-        )
+        with col2:
 
-        st.caption(
-            f"Model: {latest['model']}"
+            st.metric(
+                "Latest Finding",
+                latest["prediction"]
+            )
+
+        with col3:
+
+            st.metric(
+                "Average Confidence",
+                f"{average_confidence:.1%}"
+            )
+
+        st.bar_chart(
+            df["prediction"].value_counts()
         )
 
     # ========================================================
-    # RADIOLOGIST REVIEWS
+    # PENDING REVIEWS
     # ========================================================
 
     st.divider()
 
     st.subheader(
-        "👨‍⚕️ Radiologist Reviews"
+        "⏳ Pending Radiologist Reviews"
     )
 
-    st.caption(
-        "Professional reviews and messages "
-        "for your submitted scans."
-    )
+    if not pending_reviews:
 
-    # --------------------------------------------------------
-    # REVIEW SUMMARY
-    # --------------------------------------------------------
-
-    r1, r2, r3 = st.columns(3)
-
-    r1.metric(
-        "Reviews Requested",
-        total_reviews
-    )
-
-    r2.metric(
-        "Pending",
-        pending_reviews
-    )
-
-    r3.metric(
-        "Completed",
-        reviewed_cases
-    )
-
-    # --------------------------------------------------------
-    # REVIEW CARDS
-    # --------------------------------------------------------
-
-    if not reviews:
-
-        st.info(
-            "You have not requested a radiologist "
-            "review yet."
+        st.success(
+            "No scans are currently waiting "
+            "for radiologist review."
         )
 
     else:
 
-        for review in reviews:
-
-            status = str(
-                review.get("status", "")
-            ).lower()
+        for review in pending_reviews:
 
             scan_id = review.get(
                 "scan_id"
             )
 
-            # -----------------------------------------------
-            # FIND ASSOCIATED SCAN
-            # -----------------------------------------------
-
-            associated_scan = None
-
-            for scan in scans:
-
-                if scan.get("id") == scan_id:
-
-                    associated_scan = scan
-
-                    break
-
-            # -----------------------------------------------
-            # REVIEW CARD
-            # -----------------------------------------------
+            scan = next(
+                (
+                    s for s in scans
+                    if s.get("id") == scan_id
+                ),
+                None
+            )
 
             with st.container(
                 border=True
             ):
 
-                if status == "reviewed":
+                st.markdown(
+                    "### ⏳ Review Pending"
+                )
 
-                    st.markdown(
-                        "### ✅ Radiologist Review Completed"
-                    )
-
-                elif status == "pending":
-
-                    st.markdown(
-                        "### ⏳ Radiologist Review Pending"
-                    )
-
-                else:
-
-                    st.markdown(
-                        "### 📋 Radiologist Review"
-                    )
-
-                # -------------------------------------------
-                # SCAN INFORMATION
-                # -------------------------------------------
-
-                if associated_scan:
+                if scan:
 
                     col1, col2 = st.columns(2)
 
@@ -332,7 +239,7 @@ def show_health():
                         )
 
                         st.write(
-                            associated_scan.get(
+                            scan.get(
                                 "prediction",
                                 "Unknown"
                             )
@@ -345,91 +252,154 @@ def show_health():
                         )
 
                         st.write(
-                            f"{associated_scan.get('confidence', 0):.1%}"
+                            f"{scan.get('confidence', 0):.1%}"
                         )
 
-                # -------------------------------------------
-                # PENDING
-                # -------------------------------------------
+                st.info(
+                    "Your scan has been sent to a "
+                    "radiologist and is waiting for "
+                    "professional confirmation."
+                )
 
-                if status == "pending":
-
-                    st.info(
-                        "Your scan is waiting for "
-                        "radiologist confirmation."
-                    )
-
-                    st.caption(
-                        "The professional review will "
-                        "appear here once completed."
-                    )
-
-                # -------------------------------------------
-                # REVIEWED
-                # -------------------------------------------
-
-                elif status == "reviewed":
-
-                    st.success(
-                        "Your scan has been reviewed "
-                        "by a radiologist."
-                    )
-
-                    # ---------------------------------------
-                    # RADIOLOGIST MESSAGE
-                    # ---------------------------------------
-
-                    note = review.get(
-                        "radiologist_note"
-                    )
-
-                    if note:
-
-                        st.markdown(
-                            "#### 📝 Radiologist Message"
-                        )
-
-                        st.info(
-                            note
-                        )
-
-                    else:
-
-                        st.caption(
-                            "The radiologist completed "
-                            "the review without adding "
-                            "a message."
-                        )
-
-                    # ---------------------------------------
-                    # REVIEW DATE
-                    # ---------------------------------------
-
-                    reviewed_at = review.get(
-                        "reviewed_at"
-                    )
-
-                    if reviewed_at:
-
-                        st.caption(
-                            f"Reviewed: {reviewed_at}"
-                        )
-
-                else:
-
-                    st.warning(
-                        f"Review status: "
-                        f"{review.get('status', 'Unknown')}"
-                    )
+                st.caption(
+                    f"Requested: "
+                    f"{review.get('created_at', 'Unknown')}"
+                )
 
     # ========================================================
-    # MEDICAL DISCLAIMER
+    # REVIEWED
     # ========================================================
 
     st.divider()
 
+    st.subheader(
+        "✅ Radiologist Reviewed"
+    )
+
+    if not reviewed_reviews:
+
+        st.info(
+            "No scans have been professionally "
+            "reviewed yet."
+        )
+
+    else:
+
+        for review in reviewed_reviews:
+
+            scan_id = review.get(
+                "scan_id"
+            )
+
+            scan = next(
+                (
+                    s for s in scans
+                    if s.get("id") == scan_id
+                ),
+                None
+            )
+
+            with st.container(
+                border=True
+            ):
+
+                st.markdown(
+                    "### ✅ Professional Review Completed"
+                )
+
+                # --------------------------------------------
+                # SCAN INFORMATION
+                # --------------------------------------------
+
+                if scan:
+
+                    col1, col2 = st.columns(2)
+
+                    with col1:
+
+                        st.write(
+                            "**AI Finding**"
+                        )
+
+                        st.write(
+                            scan.get(
+                                "prediction",
+                                "Unknown"
+                            )
+                        )
+
+                    with col2:
+
+                        st.write(
+                            "**AI Confidence**"
+                        )
+
+                        st.write(
+                            f"{scan.get('confidence', 0):.1%}"
+                        )
+
+                st.success(
+                    "A radiologist has reviewed this scan."
+                )
+
+                # --------------------------------------------
+                # RADIOLOGIST MESSAGE
+                # --------------------------------------------
+
+                note = review.get(
+                    "radiologist_note"
+                )
+
+                if note:
+
+                    st.markdown(
+                        "#### 📝 Radiologist Message"
+                    )
+
+                    st.info(
+                        note
+                    )
+
+                else:
+
+                    st.caption(
+                        "The radiologist completed "
+                        "the review without adding a note."
+                    )
+
+                # --------------------------------------------
+                # REVIEW DATE
+                # --------------------------------------------
+
+                reviewed_at = review.get(
+                    "reviewed_at"
+                )
+
+                if reviewed_at:
+
+                    st.caption(
+                        f"Reviewed on: {reviewed_at}"
+                    )
+
+    # ========================================================
+    # REFRESH
+    # ========================================================
+
+    st.divider()
+
+    if st.button(
+        "🔄 Refresh Health Dashboard",
+        use_container_width=True
+    ):
+
+        st.rerun()
+
+    # ========================================================
+    # DISCLAIMER
+    # ========================================================
+
     st.caption(
         "MammoSense provides AI-assisted screening "
-        "information. AI results do not replace "
-        "professional medical evaluation."
+        "information and does not replace professional "
+        "medical evaluation."
     )
