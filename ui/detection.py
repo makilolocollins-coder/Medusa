@@ -39,6 +39,7 @@ def show_detection():
         "Analyse with MammoSense",
         type="primary",
         use_container_width=True,
+        key="analyse_mammo",
     ):
 
         try:
@@ -46,6 +47,7 @@ def show_detection():
             with st.spinner("Analysing ultrasound..."):
 
                 load_model()
+
                 result = predict(image)
 
             supabase = get_supabase()
@@ -53,10 +55,15 @@ def show_detection():
             user = supabase.auth.get_user()
 
             if not user.user:
+
                 st.error("Please log in again.")
+
                 return
 
-            # Save scan
+            # ------------------------------------------------
+            # SAVE SCAN
+            # ------------------------------------------------
+
             response = (
                 supabase
                 .table("ai_scans")
@@ -72,7 +79,10 @@ def show_detection():
 
             scan_id = response.data[0]["id"]
 
-            # Save result in session
+            # ------------------------------------------------
+            # SAVE SESSION
+            # ------------------------------------------------
+
             st.session_state.scan_result = result
             st.session_state.scan_id = scan_id
 
@@ -85,7 +95,10 @@ def show_detection():
 
         except Exception as error:
 
-            st.error("MammoSense could not analyse this image.")
+            st.error(
+                "MammoSense could not analyse this image."
+            )
+
             st.exception(error)
 
     # ========================================================
@@ -93,6 +106,7 @@ def show_detection():
     # ========================================================
 
     if "scan_result" not in st.session_state:
+
         return
 
     result = st.session_state.scan_result
@@ -104,12 +118,14 @@ def show_detection():
     col1, col2 = st.columns(2)
 
     with col1:
+
         st.metric(
             "Finding",
             result["prediction"],
         )
 
     with col2:
+
         st.metric(
             "Confidence",
             f"{result['confidence']:.1%}",
@@ -133,92 +149,115 @@ def show_detection():
 
     st.divider()
 
-# ========================================================
-# RADIOLOGIST REVIEW
-# ========================================================
-
-st.subheader("👨‍⚕️ Radiologist Review")
-
-st.write(
-    "You can request a professional radiologist "
-    "review of this AI-assisted scan."
-)
-
-if st.button(
-    "📋 Request Radiologist Review",
-    use_container_width=True,
-    key="request_review",
-):
-
-    try:
-
-        supabase = get_supabase()
-
-        user = supabase.auth.get_user()
-
-        if not user.user:
-            st.error("Please log in again.")
-            return
-
-        scan_id = st.session_state.get("scan_id")
-
-        if not scan_id:
-            st.error("No scan found.")
-            return
-
-        # Check whether review already exists
-        existing = (
-            supabase
-            .table("radiologist_requests")
-            .select("id, status")
-            .eq("scan_id", scan_id)
-            .eq("user_id", user.user.id)
-            .execute()
-            .data
-        )
-
-        if existing:
-
-            st.info(
-                f"Radiologist review already requested. "
-                f"Status: {existing[0]['status']}"
-            )
-
-        else:
-
-            supabase.table(
-                "radiologist_requests"
-            ).insert({
-                "user_id": user.user.id,
-                "scan_id": scan_id,
-                "status": "Pending",
-            }).execute()
-
-            st.success(
-                "✅ Radiologist review requested."
-            )
-
-            st.info(
-                "Your scan is now waiting for "
-                "radiologist review."
-            )
-
-    except Exception as error:
-
-        st.error(
-            "Unable to request radiologist review."
-        )
-
-        st.exception(error)
     # ========================================================
-    # RADIOLOGIST CONSULTATION
+    # RADIOLOGIST REVIEW
     # ========================================================
 
-    st.subheader("👨‍⚕️ Radiologist Consultation")
+    st.subheader("👨‍⚕️ Radiologist Review")
 
     st.write(
-        "Would you like a qualified radiologist "
-        "to review your scan?"
+        "Request a professional radiologist "
+        "review of this scan."
+    )
+
+    if st.button(
+        "📋 Request Radiologist Review",
+        type="secondary",
+        use_container_width=True,
+        key="radiologist_review",
+    ):
+
+        try:
+
+            supabase = get_supabase()
+
+            user = supabase.auth.get_user()
+
+            if not user.user:
+
+                st.error("Please log in again.")
+
+                return
+
+            scan_id = st.session_state.get(
+                "scan_id"
+            )
+
+            if not scan_id:
+
+                st.error(
+                    "No scan is available for review."
+                )
+
+                return
+
+            # Check existing request
+
+            existing = (
+                supabase
+                .table("radiologist_requests")
+                .select("id,status")
+                .eq(
+                    "scan_id",
+                    scan_id
+                )
+                .eq(
+                    "user_id",
+                    user.user.id
+                )
+                .execute()
+                .data
+            )
+
+            if existing:
+
+                st.info(
+                    "Review already requested."
+                )
+
+                st.caption(
+                    f"Status: {existing[0]['status']}"
+                )
+
+            else:
+
+                supabase.table(
+                    "radiologist_requests"
+                ).insert({
+                    "user_id": user.user.id,
+                    "scan_id": scan_id,
+                    "status": "Pending",
+                }).execute()
+
+                st.success(
+                    "✅ Radiologist review requested."
+                )
+
+                st.info(
+                    "Your scan is now waiting "
+                    "for professional review."
+                )
+
+        except Exception as error:
+
+            st.error(
+                "Could not request radiologist review."
+            )
+
+            st.exception(error)
+
+    st.divider()
+
+    # ========================================================
+    # CONSULTATION
+    # ========================================================
+
+    st.subheader(
+        "📞 Book a Consultation"
+    )
+
+    st.write(
+        "Speak with a radiologist about your scan."
     )
 
     call_type = st.selectbox(
@@ -227,12 +266,12 @@ if st.button(
             "Video call",
             "Voice call",
         ],
-        key="call_type",
+        key="consultation_type",
     )
 
     preferred_date = st.date_input(
         "Preferred date",
-        key="consultation_date",
+        key="preferred_date",
     )
 
     preferred_time = st.selectbox(
@@ -246,14 +285,14 @@ if st.button(
             "15:00",
             "16:00",
         ],
-        key="consultation_time",
+        key="preferred_time",
     )
 
     if st.button(
         "📞 Book Radiologist Consultation",
         type="primary",
         use_container_width=True,
-        key="book_consultation",
+        key="book_radiologist",
     ):
 
         try:
@@ -263,7 +302,9 @@ if st.button(
             user = supabase.auth.get_user()
 
             if not user.user:
+
                 st.error("Please log in again.")
+
                 return
 
             scan_id = st.session_state.get(
@@ -271,9 +312,12 @@ if st.button(
             )
 
             if not scan_id:
+
                 st.error(
-                    "No scan was found for this consultation."
+                    "No scan is associated "
+                    "with this consultation."
                 )
+
                 return
 
             supabase.table(
@@ -282,7 +326,9 @@ if st.button(
                 "user_id": user.user.id,
                 "scan_id": scan_id,
                 "call_type": call_type,
-                "preferred_date": str(preferred_date),
+                "preferred_date": str(
+                    preferred_date
+                ),
                 "preferred_time": preferred_time,
                 "status": "Pending",
             }).execute()
@@ -292,37 +338,21 @@ if st.button(
             )
 
             st.info(
-                "Your consultation is pending confirmation "
-                "by a radiologist."
+                "Your consultation is pending "
+                "radiologist confirmation."
             )
-
-            st.session_state.consultation_booked = True
 
         except Exception as error:
 
             st.error(
-                "Unable to book consultation."
+                "Could not book consultation."
             )
 
             st.exception(error)
 
     # ========================================================
-    # STATUS
+    # DISCLAIMER
     # ========================================================
-
-    if st.session_state.get(
-        "consultation_booked",
-        False
-    ):
-
-        st.success(
-            "📞 Consultation Status: Pending"
-        )
-
-        st.caption(
-            "A radiologist will review your request "
-            "and confirm the consultation."
-        )
 
     st.divider()
 
