@@ -73,7 +73,7 @@ def show_verification():
 
     supabase = get_supabase()
 
-    st.title("📧 Verify your email")
+    st.title("Verify your email")
 
     email = st.session_state.get(
         "auth_email",
@@ -81,50 +81,83 @@ def show_verification():
     )
 
     st.write(
-        f"We sent a verification email to **{email}**."
+        f"We sent a verification code to **{email}**."
     )
 
-    st.info(
-        "Open the email and follow the verification "
-        "instructions."
+    code = st.text_input(
+        "Enter verification code",
+        max_chars=6,
     )
-
-    st.divider()
-
-    st.subheader("Already verified?")
 
     if st.button(
-        "Continue",
+        "Verify email",
         type="primary",
+        use_container_width=True,
+    ):
+
+        if len(code) != 6:
+
+            st.error(
+                "Enter the 6-digit code."
+            )
+
+            return
+
+        try:
+
+            response = supabase.auth.verify_otp(
+                {
+                    "email": email,
+                    "token": code,
+                    "type": "email",
+                }
+            )
+
+            if response.user:
+
+                st.session_state.authenticated = True
+                st.session_state.verify_email = False
+
+                st.success(
+                    "Email verified successfully."
+                )
+
+                st.rerun()
+
+        except Exception as error:
+
+            st.error(
+                f"Invalid verification code: {error}"
+            )
+
+    # ========================================================
+    # RESEND VERIFICATION EMAIL
+    # ========================================================
+
+    if st.button(
+        "Resend verification email",
         use_container_width=True,
     ):
 
         try:
 
-            user = supabase.auth.get_user()
+            supabase.auth.resend(
+                {
+                    "type": "signup",
+                    "email": email,
+                }
+            )
 
-            if user and user.user:
-
-                st.session_state.authenticated = True
-                st.session_state.auth_step = (
-                    "authenticated"
-                )
-
-                st.rerun()
-
-            else:
-
-                st.warning(
-                    "Your email has not been verified yet."
-                )
+            st.success(
+                "A new verification email has been sent."
+            )
 
         except Exception as error:
 
             st.error(
-                f"Could not check verification: {error}"
+                f"Could not resend email: {error}"
             )
-
-
+            
 def show_login():
 
     supabase = get_supabase()
