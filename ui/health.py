@@ -10,165 +10,48 @@ def show_health():
 
     st.header("❤️ Health")
 
-    st.write(
-        "Your health information and AI analysis history."
-    )
-
-    st.divider()
-
-    # ========================================================
-    # SUPABASE
-    # ========================================================
-
-    supabase = get_supabase()
+    st.write("Testing Supabase health history...")
 
     try:
 
+        supabase = get_supabase()
+
+        st.success("Supabase client loaded.")
+
         user_response = supabase.auth.get_user()
 
+        st.write(
+            "Authenticated user:",
+            user_response.user.id
+            if user_response.user
+            else "NO USER",
+        )
+
         if not user_response.user:
-
-            st.warning(
-                "Please log in to view your health history."
-            )
-
+            st.error("No logged-in Supabase user.")
             return
 
         user_id = user_response.user.id
-
-        # ====================================================
-        # LOAD USER SCANS
-        # ====================================================
 
         response = (
             supabase
             .table("ai_scans")
             .select("*")
             .eq("user_id", user_id)
-            .order(
-                "created_at",
-                desc=True,
-            )
+            .order("created_at", desc=True)
             .execute()
         )
 
-        scans = response.data or []
+        st.success("Successfully connected to ai_scans.")
+
+        st.write("Number of scans:", len(response.data))
+
+        st.write("Database response:")
+
+        st.json(response.data)
 
     except Exception as error:
 
-        st.error(
-            "Unable to load your health history."
-        )
+        st.error("Health history failed.")
 
         st.exception(error)
-
-        return
-
-    # ========================================================
-    # SUMMARY
-    # ========================================================
-
-    latest = (
-        scans[0]["prediction"]
-        if scans
-        else "None"
-    )
-
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-
-        st.metric(
-            "AI Analyses",
-            len(scans),
-        )
-
-    with col2:
-
-        st.metric(
-            "Latest Result",
-            latest,
-        )
-
-    with col3:
-
-        st.metric(
-            "Status",
-            "Active",
-        )
-
-    st.divider()
-
-    # ========================================================
-    # HISTORY
-    # ========================================================
-
-    st.subheader(
-        "Analysis History"
-    )
-
-    if not scans:
-
-        st.info(
-            "No AI analysis has been completed yet."
-        )
-
-        return
-
-    # ========================================================
-    # DISPLAY SCANS
-    # ========================================================
-
-    for scan in scans:
-
-        prediction = scan.get(
-            "prediction",
-            "Unknown",
-        )
-
-        confidence = scan.get(
-            "confidence"
-        )
-
-        model = scan.get(
-            "model",
-            "Unknown model",
-        )
-
-        created_at = scan.get(
-            "created_at",
-            "",
-        )
-
-        if confidence is not None:
-
-            confidence_text = (
-                f"{confidence:.1%}"
-            )
-
-        else:
-
-            confidence_text = "N/A"
-
-        with st.container(
-            border=True
-        ):
-
-            st.write(
-                f"### {prediction}"
-            )
-
-            st.write(
-                f"**Model:** {model}"
-            )
-
-            st.write(
-                f"**Confidence:** "
-                f"{confidence_text}"
-            )
-
-            if created_at:
-
-                st.caption(
-                    created_at
-                )
