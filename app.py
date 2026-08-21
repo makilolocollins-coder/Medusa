@@ -6,6 +6,7 @@ from ui.detection import show_detection
 from ui.health import show_health
 from ui.marketplace import show_marketplace
 from ui.profile import show_profile
+from ui.radiologist import show_radiologist
 
 from ui.auth import (
     show_auth,
