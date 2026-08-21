@@ -133,6 +133,83 @@ def show_detection():
 
     st.divider()
 
+# ========================================================
+# RADIOLOGIST REVIEW
+# ========================================================
+
+st.subheader("👨‍⚕️ Radiologist Review")
+
+st.write(
+    "You can request a professional radiologist "
+    "review of this AI-assisted scan."
+)
+
+if st.button(
+    "📋 Request Radiologist Review",
+    use_container_width=True,
+    key="request_review",
+):
+
+    try:
+
+        supabase = get_supabase()
+
+        user = supabase.auth.get_user()
+
+        if not user.user:
+            st.error("Please log in again.")
+            return
+
+        scan_id = st.session_state.get("scan_id")
+
+        if not scan_id:
+            st.error("No scan found.")
+            return
+
+        # Check whether review already exists
+        existing = (
+            supabase
+            .table("radiologist_requests")
+            .select("id, status")
+            .eq("scan_id", scan_id)
+            .eq("user_id", user.user.id)
+            .execute()
+            .data
+        )
+
+        if existing:
+
+            st.info(
+                f"Radiologist review already requested. "
+                f"Status: {existing[0]['status']}"
+            )
+
+        else:
+
+            supabase.table(
+                "radiologist_requests"
+            ).insert({
+                "user_id": user.user.id,
+                "scan_id": scan_id,
+                "status": "Pending",
+            }).execute()
+
+            st.success(
+                "✅ Radiologist review requested."
+            )
+
+            st.info(
+                "Your scan is now waiting for "
+                "radiologist review."
+            )
+
+    except Exception as error:
+
+        st.error(
+            "Unable to request radiologist review."
+        )
+
+        st.exception(error)
     # ========================================================
     # RADIOLOGIST CONSULTATION
     # ========================================================
