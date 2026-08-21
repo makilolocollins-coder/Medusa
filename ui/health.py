@@ -1,395 +1,155 @@
 import streamlit as st
+import pandas as pd
 
 from ui.background import set_background
 from utils.supabase_client import get_supabase
 
 
-# ============================================================
-# HEALTH DASHBOARD
-# ============================================================
-
 def show_health():
 
     set_background("health.jpg")
 
-    # ========================================================
-    # HEADER
-    # ========================================================
+    # --------------------------------------------------------
+    # LOAD DATA
+    # --------------------------------------------------------
 
-    st.markdown(
-        """
-        <div style="
-            padding: 10px 0 5px 0;
-        ">
-            <div style="
-                font-size: 14px;
-                font-weight: 600;
-                opacity: 0.65;
-                letter-spacing: 1px;
-            ">
-                MEDUSA HEALTH
-            </div>
+    supabase = get_supabase()
+    user = supabase.auth.get_user()
 
-            <div style="
-                font-size: 34px;
-                font-weight: 800;
-                margin-top: 4px;
-            ">
-                Your Health Dashboard
-            </div>
-
-            <div style="
-                font-size: 16px;
-                opacity: 0.7;
-                margin-top: 5px;
-            ">
-                Your personal AI-assisted health activity.
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown("")
-
-    # ========================================================
-    # SUPABASE
-    # ========================================================
-
-    try:
-
-        supabase = get_supabase()
-
-        user_response = supabase.auth.get_user()
-
-        if not user_response.user:
-
-            st.warning(
-                "Please log in to view your health dashboard."
-            )
-
-            return
-
-        user_id = user_response.user.id
-
-        # ====================================================
-        # LOAD SCANS
-        # ====================================================
-
-        response = (
-            supabase
-            .table("ai_scans")
-            .select("*")
-            .eq("user_id", user_id)
-            .order(
-                "created_at",
-                desc=True
-            )
-            .execute()
-        )
-
-        scans = response.data or []
-
-    except Exception as error:
-
-        st.error(
-            "Unable to load your health information."
-        )
-
-        st.exception(error)
-
+    if not user.user:
+        st.warning("Please log in.")
         return
 
-    # ========================================================
-    # BASIC STATISTICS
-    # ========================================================
+    scans = (
+        supabase
+        .table("ai_scans")
+        .select("*")
+        .eq("user_id", user.user.id)
+        .order("created_at", desc=True)
+        .execute()
+        .data
+        or []
+    )
 
-    total_scans = len(scans)
+    st.title("❤️ Health Dashboard")
+    st.caption("Your personal AI health activity")
 
-    if scans:
+    if not scans:
+        st.info("No scans yet. Start with AI Detection.")
+        return
 
-        latest = scans[0]
+    # --------------------------------------------------------
+    # DATA
+    # --------------------------------------------------------
 
-        latest_prediction = latest.get(
-            "prediction",
-            "Unknown"
+    df = pd.DataFrame(scans)
+
+    total = len(df)
+    latest = df.iloc[0]
+
+    average_confidence = df["confidence"].mean()
+
+    most_common = df["prediction"].value_counts().idxmax()
+
+    # --------------------------------------------------------
+    # KPI CARDS
+    # --------------------------------------------------------
+
+    a, b, c, d = st.columns(4)
+
+    a.metric(
+        "Total Scans",
+        total
+    )
+
+    b.metric(
+        "Latest Result",
+        latest["prediction"]
+    )
+
+    c.metric(
+        "Avg. Confidence",
+        f"{average_confidence:.1%}"
+    )
+
+    d.metric(
+        "Most Frequent",
+        most_common
+    )
+
+    st.divider()
+
+    # --------------------------------------------------------
+    # CHART + LATEST RESULT
+    # --------------------------------------------------------
+
+    left, right = st.columns(2)
+
+    with left:
+
+        st.subheader("Findings")
+
+        counts = (
+            df["prediction"]
+            .value_counts()
         )
 
-        latest_confidence = latest.get(
-            "confidence",
-            0
-        )
+        st.bar_chart(counts)
 
-    else:
+    with right:
 
-        latest_prediction = "None"
-
-        latest_confidence = 0
-
-    # ========================================================
-    # SUMMARY CARDS
-    # ========================================================
-
-    col1, col2, col3, col4 = st.columns(4)
-
-    with col1:
+        st.subheader("Latest Analysis")
 
         st.metric(
-            "Total Scans",
-            total_scans
+            "Finding",
+            latest["prediction"]
         )
-
-    with col2:
-
-        st.metric(
-            "Latest Finding",
-            latest_prediction
-        )
-
-    with col3:
 
         st.metric(
             "Confidence",
-            f"{latest_confidence:.1%}"
-            if scans
-            else "N/A"
+            f"{latest['confidence']:.1%}"
         )
 
-    with col4:
-
-        st.metric(
-            "Account",
-            "Active"
+        st.caption(
+            f"Model: {latest['model']}"
         )
-
-    st.markdown("")
-
-    # ========================================================
-    # NO HISTORY
-    # ========================================================
-
-    if not scans:
-
-        st.info(
-            "You haven't completed an AI analysis yet."
-        )
-
-        st.markdown(
-            "Go to **AI Detection** to perform your "
-            "first MammoSense analysis."
-        )
-
-        return
-
-    # ========================================================
-    # LATEST RESULT
-    # ========================================================
-
-    st.subheader(
-        "Latest AI Analysis"
-    )
-
-    prediction = latest.get(
-        "prediction",
-        "Unknown"
-    )
-
-    confidence = latest.get(
-        "confidence",
-        0
-    )
-
-    probabilities = latest.get(
-        "probabilities",
-        {}
-    )
-
-    with st.container(border=True):
-
-        left, right = st.columns(
-            [2, 1]
-        )
-
-        with left:
-
-            st.markdown(
-                f"### {prediction}"
-            )
-
-            st.write(
-                "MammoSense V2"
-            )
-
-            if latest.get("created_at"):
-
-                st.caption(
-                    latest["created_at"]
-                )
-
-        with right:
-
-            st.metric(
-                "Confidence",
-                f"{confidence:.1%}"
-            )
-
-    # ========================================================
-    # PROBABILITY BREAKDOWN
-    # ========================================================
-
-    if probabilities:
-
-        st.subheader(
-            "AI Probability Breakdown"
-        )
-
-        normal = probabilities.get(
-            "Normal",
-            0
-        )
-
-        benign = probabilities.get(
-            "Benign",
-            0
-        )
-
-        malignant = probabilities.get(
-            "Malignant",
-            0
-        )
-
-        a, b, c = st.columns(3)
-
-        with a:
-
-            st.metric(
-                "Normal",
-                f"{normal:.1%}"
-            )
-
-            st.progress(
-                min(max(normal, 0), 1)
-            )
-
-        with b:
-
-            st.metric(
-                "Benign",
-                f"{benign:.1%}"
-            )
-
-            st.progress(
-                min(max(benign, 0), 1)
-            )
-
-        with c:
-
-            st.metric(
-                "Malignant",
-                f"{malignant:.1%}"
-            )
-
-            st.progress(
-                min(max(malignant, 0), 1)
-            )
 
     st.divider()
 
-    # ========================================================
-    # SCAN HISTORY
-    # ========================================================
+    # --------------------------------------------------------
+    # RECENT ACTIVITY
+    # --------------------------------------------------------
 
-    st.subheader(
-        "🧬 Scan History"
-    )
+    st.subheader("Recent Activity")
 
-    st.caption(
-        f"{total_scans} recorded AI analyses"
-    )
-
-    for index, scan in enumerate(scans):
-
-        prediction = scan.get(
-            "prediction",
-            "Unknown"
-        )
-
-        confidence = scan.get(
-            "confidence",
-            0
-        )
-
-        model = scan.get(
-            "model",
-            "Unknown"
-        )
-
-        created_at = scan.get(
+    history = df[
+        [
             "created_at",
-            ""
-        )
+            "model",
+            "prediction",
+            "confidence",
+        ]
+    ].copy()
 
-        probabilities = scan.get(
-            "probabilities",
-            {}
-        )
+    history["confidence"] = (
+        history["confidence"]
+        .map(lambda x: f"{x:.1%}")
+    )
 
-        with st.container(border=True):
+    history.columns = [
+        "Date",
+        "Model",
+        "Finding",
+        "Confidence",
+    ]
 
-            col1, col2, col3 = st.columns(
-                [3, 2, 1]
-            )
-
-            with col1:
-
-                st.markdown(
-                    f"**{prediction}**"
-                )
-
-                st.caption(
-                    model
-                )
-
-            with col2:
-
-                st.write(
-                    f"Confidence: "
-                    f"**{confidence:.1%}**"
-                )
-
-                if created_at:
-
-                    st.caption(
-                        created_at
-                    )
-
-            with col3:
-
-                if probabilities:
-
-                    with st.popover(
-                        "Details"
-                    ):
-
-                        st.write(
-                            "Probability breakdown"
-                        )
-
-                        for name, value in probabilities.items():
-
-                            st.write(
-                                f"{name}: "
-                                f"{value:.2%}"
-                            )
-
-    # ========================================================
-    # DISCLAIMER
-    # ========================================================
-
-    st.divider()
+    st.dataframe(
+        history,
+        use_container_width=True,
+        hide_index=True,
+    )
 
     st.caption(
-        "MammoSense provides AI-assisted screening information "
-        "and is not a substitute for professional medical "
-        "diagnosis or medical advice."
+        "AI-assisted screening only. "
+        "Not a substitute for professional medical advice."
     )
