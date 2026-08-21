@@ -1,6 +1,7 @@
 import streamlit as st
 
 from ui.background import set_background
+from utils.supabase_client import get_supabase
 
 
 def show_health():
@@ -10,30 +11,87 @@ def show_health():
     st.header("❤️ Health")
 
     st.write(
-        "Your health information and "
-        "AI analysis history."
+        "Your health information and AI analysis history."
     )
 
     st.divider()
 
-    history = st.session_state.history
-    prediction = st.session_state.prediction
+    # ========================================================
+    # SUPABASE
+    # ========================================================
+
+    supabase = get_supabase()
+
+    try:
+
+        user_response = supabase.auth.get_user()
+
+        if not user_response.user:
+
+            st.warning(
+                "Please log in to view your health history."
+            )
+
+            return
+
+        user_id = user_response.user.id
+
+        # ====================================================
+        # LOAD USER SCANS
+        # ====================================================
+
+        response = (
+            supabase
+            .table("ai_scans")
+            .select("*")
+            .eq("user_id", user_id)
+            .order(
+                "created_at",
+                desc=True,
+            )
+            .execute()
+        )
+
+        scans = response.data or []
+
+    except Exception as error:
+
+        st.error(
+            "Unable to load your health history."
+        )
+
+        st.exception(error)
+
+        return
+
+    # ========================================================
+    # SUMMARY
+    # ========================================================
+
+    latest = (
+        scans[0]["prediction"]
+        if scans
+        else "None"
+    )
 
     col1, col2, col3 = st.columns(3)
 
     with col1:
+
         st.metric(
             "AI Analyses",
-            len(history),
+            len(scans),
         )
 
     with col2:
+
         st.metric(
             "Latest Result",
-            prediction if prediction else "None",
+            latest,
         )
 
     with col3:
+
         st.metric(
             "Status",
             "Active",
@@ -41,36 +99,76 @@ def show_health():
 
     st.divider()
 
-    st.subheader("Analysis History")
+    # ========================================================
+    # HISTORY
+    # ========================================================
 
-    if not history:
+    st.subheader(
+        "Analysis History"
+    )
+
+    if not scans:
+
         st.info(
             "No AI analysis has been completed yet."
         )
+
         return
 
-    for item in reversed(history):
+    # ========================================================
+    # DISPLAY SCANS
+    # ========================================================
 
-        if isinstance(item, dict):
+    for scan in scans:
 
-            result = item.get(
-                "prediction",
-                "Unknown",
-            )
+        prediction = scan.get(
+            "prediction",
+            "Unknown",
+        )
 
-            confidence = item.get(
-                "confidence"
-            )
+        confidence = scan.get(
+            "confidence"
+        )
 
-            if confidence is not None:
-                confidence_text = f"{confidence:.1%}"
-            else:
-                confidence_text = "N/A"
+        model = scan.get(
+            "model",
+            "Unknown model",
+        )
 
-            st.write(
-                f"**{result}** • "
-                f"Confidence: {confidence_text}"
+        created_at = scan.get(
+            "created_at",
+            "",
+        )
+
+        if confidence is not None:
+
+            confidence_text = (
+                f"{confidence:.1%}"
             )
 
         else:
-            st.write(str(item))
+
+            confidence_text = "N/A"
+
+        with st.container(
+            border=True
+        ):
+
+            st.write(
+                f"### {prediction}"
+            )
+
+            st.write(
+                f"**Model:** {model}"
+            )
+
+            st.write(
+                f"**Confidence:** "
+                f"{confidence_text}"
+            )
+
+            if created_at:
+
+                st.caption(
+                    created_at
+                )
