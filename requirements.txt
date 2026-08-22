@@ -6,3 +6,5 @@ Pillow
 huggingface_hub
 numpy
 supabase
+reportlab
+qrcode
