@@ -1,24 +1,22 @@
 # ================================================================
 # MEDUSA AI
-# RADIOLOGIST DASHBOARD
+# RADIOLOGIST PORTAL
 #
-# ONLY RADIOLOGIST SIDE
+# ONLY RADIOLOGISTS CAN:
+# - View pending examinations
+# - Review images
+# - Enter findings
+# - Enter impression
+# - Enter recommendations
+# - Add remarks
+# - Approve examination
+# - Generate final medical report
 #
-# Radiologist:
-#   - sees pending scans
-#   - reviews image
-#   - enters findings
-#   - enters impression
-#   - enters recommendations
-#   - enters remarks
-#   - approves report
-#
-# Approval generates final PDF.
+# PATIENTS CANNOT COMPLETE THIS FORM.
 # ================================================================
 
 import io
 from datetime import datetime
-import uuid
 
 import streamlit as st
 from PIL import Image
@@ -28,7 +26,7 @@ from reports.pdf_report import generate_pdf_report
 
 
 # ================================================================
-# USER
+# CURRENT USER
 # ================================================================
 
 def get_current_user():
@@ -37,127 +35,360 @@ def get_current_user():
 
     response = supabase.auth.get_user()
 
-    if not response.user:
-        return None
+    if response.user:
+        return response.user
 
-    return response.user
+    return None
 
 
 # ================================================================
-# RADIOLOGIST DASHBOARD
+# RADIOLOGIST AUTHORIZATION
 # ================================================================
 
-def show_radiologist():
-
-    st.title("👨‍⚕️ Radiologist Dashboard")
-
-    st.caption(
-        "Medusa AI — Clinical Review Centre"
-    )
+def get_radiologist():
 
     user = get_current_user()
 
     if user is None:
-
-        st.error(
-            "Please log in to continue."
-        )
-
-        return
+        return None
 
     supabase = get_supabase()
 
+    doctors = (
+        supabase
+        .table("radiologists")
+        .select(
+            "user_id,full_name,active"
+        )
+        .eq(
+            "user_id",
+            user.id,
+        )
+        .eq(
+            "active",
+            True,
+        )
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+
+    if not doctors:
+        return None
+
+    return doctors[0]
+
+
+# ================================================================
+# LOAD PENDING REQUESTS
+# ================================================================
+
+def load_pending_requests():
+
+    supabase = get_supabase()
+
+    requests = (
+        supabase
+        .table("radiologist_requests")
+        .select("*")
+        .eq(
+            "status",
+            "PENDING",
+        )
+        .order(
+            "created_at",
+            desc=False,
+        )
+        .execute()
+        .data
+        or []
+    )
+
+    return requests
+
+
+# ================================================================
+# LOAD SCAN
+# ================================================================
+
+def load_scan(scan_id):
+
+    supabase = get_supabase()
+
+    scans = (
+        supabase
+        .table("ai_scans")
+        .select("*")
+        .eq(
+            "id",
+            scan_id,
+        )
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+
+    if not scans:
+        return None
+
+    return scans[0]
+
+
+# ================================================================
+# LOAD EXISTING REVIEW
+# ================================================================
+
+def load_review(scan_id):
+
+    supabase = get_supabase()
+
+    reviews = (
+        supabase
+        .table("radiologist_reviews")
+        .select("*")
+        .eq(
+            "scan_id",
+            scan_id,
+        )
+        .order(
+            "created_at",
+            desc=True,
+        )
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+
+    if not reviews:
+        return None
+
+    return reviews[0]
+
+
+# ================================================================
+# MAIN
+# ================================================================
+
+def show_radiologist():
+
+    st.title(
+        "👨‍⚕️ Radiologist Portal"
+    )
+
+    st.caption(
+        "Medusa AI Clinical Review Workspace"
+    )
+
     # ============================================================
-    # PENDING SCANS
+    # AUTHORIZATION
     # ============================================================
 
-    st.subheader(
-        "Pending Examinations"
+    radiologist = get_radiologist()
+
+    if radiologist is None:
+
+        st.error(
+            "Access denied."
+        )
+
+        st.warning(
+            "This area is restricted to "
+            "authorized radiologists."
+        )
+
+        st.stop()
+
+    radiologist_name = (
+        radiologist.get("full_name")
+        or "Radiologist"
     )
+
+    st.success(
+        f"Signed in as {radiologist_name}"
+    )
+
+    # ============================================================
+    # DASHBOARD METRICS
+    # ============================================================
 
     try:
 
-        pending = (
+        requests = load_pending_requests()
+
+        pending_count = len(requests)
+
+        supabase = get_supabase()
+
+        approved_reviews = (
             supabase
-            .table("ai_scans")
-            .select("*")
+            .table("radiologist_reviews")
+            .select(
+                "id",
+                count="exact",
+            )
             .eq(
                 "status",
-                "PENDING_REVIEW",
-            )
-            .order(
-                "created_at",
-                desc=False,
+                "APPROVED",
             )
             .execute()
-            .data
-            or []
+        )
+
+        approved_count = (
+            approved_reviews.count
+            if approved_reviews.count is not None
+            else 0
+        )
+
+        total_reviews = (
+            supabase
+            .table("radiologist_reviews")
+            .select(
+                "id",
+                count="exact",
+            )
+            .execute()
+        )
+
+        total_count = (
+            total_reviews.count
+            if total_reviews.count is not None
+            else 0
         )
 
     except Exception as error:
 
         st.error(
-            "Could not load pending examinations."
+            "Unable to load radiologist dashboard."
         )
 
         st.exception(error)
 
         return
 
-    if not pending:
-
-        st.success(
-            "✓ No examinations are currently "
-            "waiting for review."
-        )
-
-        return
-
-    st.info(
-        f"{len(pending)} examination(s) "
-        "awaiting review."
+    st.subheader(
+        "Clinical Review Dashboard"
     )
 
-    # ============================================================
-    # SELECT SCAN
-    # ============================================================
+    c1, c2, c3 = st.columns(3)
 
-    scan_labels = []
+    with c1:
 
-    scan_map = {}
-
-    for scan in pending:
-
-        label = (
-            f"{scan.get('patient_name', 'Unknown')} "
-            f"| "
-            f"{scan.get('patient_id', 'No ID')} "
-            f"| "
-            f"{scan.get('examination', 'Examination')}"
+        st.metric(
+            "Pending Reviews",
+            pending_count,
         )
 
-        scan_labels.append(label)
+    with c2:
 
-        scan_map[label] = scan
+        st.metric(
+            "Completed Reviews",
+            approved_count,
+        )
 
-    selected_label = st.selectbox(
-        "Select examination",
-        scan_labels,
-        key="radiologist_scan_selector",
-    )
+    with c3:
 
-    scan = scan_map[selected_label]
-
-    scan_id = scan["id"]
+        st.metric(
+            "Total Reviews",
+            total_count,
+        )
 
     # ============================================================
-    # PATIENT INFORMATION
+    # PENDING EXAMINATIONS
     # ============================================================
 
     st.divider()
 
     st.subheader(
-        "Patient Information"
+        "Pending Examinations"
+    )
+
+    if not requests:
+
+        st.success(
+            "No examinations are currently "
+            "waiting for review."
+        )
+
+        return
+
+    # ============================================================
+    # REQUEST SELECTOR
+    # ============================================================
+
+    request_options = {}
+
+    for request in requests:
+
+        scan_id = request.get(
+            "scan_id"
+        )
+
+        if not scan_id:
+            continue
+
+        scan = load_scan(scan_id)
+
+        if not scan:
+            continue
+
+        patient_id = (
+            scan.get("patient_id")
+            or "Unknown"
+        )
+
+        patient_name = (
+            scan.get("patient_name")
+            or "Unknown patient"
+        )
+
+        examination = (
+            scan.get("examination")
+            or "Medical imaging"
+        )
+
+        label = (
+            f"{patient_name} | "
+            f"{patient_id} | "
+            f"{examination}"
+        )
+
+        request_options[label] = (
+            request,
+            scan,
+        )
+
+    if not request_options:
+
+        st.warning(
+            "No valid examination records "
+            "were found."
+        )
+
+        return
+
+    selected_label = st.selectbox(
+        "Select examination to review",
+        list(request_options.keys()),
+        key="radiologist_selected_request",
+    )
+
+    selected_request, scan = (
+        request_options[selected_label]
+    )
+
+    scan_id = scan.get("id")
+
+    # ============================================================
+    # PATIENT / EXAMINATION DETAILS
+    # ============================================================
+
+    st.divider()
+
+    st.subheader(
+        "Examination Details"
     )
 
     c1, c2, c3 = st.columns(3)
@@ -202,8 +433,29 @@ def show_radiologist():
         f"{scan.get('model', 'Unknown')}"
     )
 
+    st.write(
+        f"**AI Prediction:** "
+        f"{scan.get('prediction', 'Unknown')}"
+    )
+
+    confidence = scan.get(
+        "confidence"
+    )
+
+    if confidence is not None:
+
+        try:
+
+            st.write(
+                f"**AI Confidence:** "
+                f"{float(confidence):.2%}"
+            )
+
+        except Exception:
+            pass
+
     # ============================================================
-    # IMAGE
+    # MEDICAL IMAGE
     # ============================================================
 
     st.divider()
@@ -222,9 +474,10 @@ def show_radiologist():
 
         try:
 
+            supabase = get_supabase()
+
             image_bytes = (
-                supabase
-                .storage
+                supabase.storage
                 .from_("mammosense-scans")
                 .download(image_path)
             )
@@ -235,9 +488,11 @@ def show_radiologist():
 
             st.image(
                 image,
-                caption=scan.get(
-                    "examination",
-                    "Medical image",
+                caption=(
+                    scan.get(
+                        "examination",
+                        "Medical image",
+                    )
                 ),
                 use_container_width=True,
             )
@@ -245,80 +500,91 @@ def show_radiologist():
         except Exception as error:
 
             st.error(
-                "Unable to load the medical image."
+                "Unable to load the examination image."
             )
 
             st.exception(error)
 
-    # ============================================================
-    # AI RESULT
-    # ============================================================
+    else:
 
-    st.divider()
-
-    st.subheader(
-        "AI Screening Result"
-    )
-
-    prediction = scan.get(
-        "prediction",
-        "Unknown",
-    )
-
-    confidence = float(
-        scan.get(
-            "confidence",
-            0,
+        st.warning(
+            "No image path is associated "
+            "with this examination."
         )
-    )
 
-    c1, c2 = st.columns(2)
-
-    with c1:
-
-        if prediction.upper() in (
-            "PNEUMONIA",
-            "MALIGNANT",
-        ):
-
-            st.error(
-                f"⚠️ {prediction}"
-            )
-
-        else:
-
-            st.success(
-                f"✓ {prediction}"
-            )
-
-    with c2:
-
-        st.metric(
-            "AI Confidence",
-            f"{confidence:.1%}",
-        )
+    # ============================================================
+    # AI PROBABILITIES
+    # ============================================================
 
     probabilities = scan.get(
         "probabilities",
         {},
     )
 
-    if isinstance(probabilities, dict):
+    if (
+        isinstance(probabilities, dict)
+        and probabilities
+    ):
+
+        st.subheader(
+            "AI Probability Breakdown"
+        )
 
         for name, value in probabilities.items():
 
-            value = float(value)
+            try:
+
+                value = float(value)
+
+                st.write(
+                    f"**{name}: {value:.2%}**"
+                )
+
+                st.progress(
+                    min(
+                        max(value, 0.0),
+                        1.0,
+                    )
+                )
+
+            except Exception:
+                continue
+
+    # ============================================================
+    # EXISTING REVIEW
+    # ============================================================
+
+    existing_review = load_review(
+        scan_id
+    )
+
+    if existing_review:
+
+        existing_status = str(
+            existing_review.get(
+                "status",
+                "",
+            )
+        ).upper()
+
+        if existing_status == "APPROVED":
+
+            st.success(
+                "This examination has already "
+                "been approved."
+            )
 
             st.write(
-                f"**{name}: {value:.2%}**"
+                f"**Reviewed by:** "
+                f"{existing_review.get('radiologist_name', '')}"
             )
 
-            st.progress(
-                min(
-                    max(value, 0.0),
-                    1.0,
-                )
+            st.write(
+                f"**Impression:** "
+                f"{existing_review.get('impression', '')}"
             )
+
+            return
 
     # ============================================================
     # RADIOLOGIST REVIEW
@@ -330,62 +596,62 @@ def show_radiologist():
         "Clinical Review"
     )
 
-    st.warning(
-        "The AI result is an assistive screening "
-        "output. The radiologist must independently "
-        "review the medical image and provide the "
-        "final clinical interpretation."
+    st.info(
+        "Complete the clinical review before "
+        "approving this examination."
     )
 
-    radiologist_name = st.text_input(
-        "Radiologist full name",
-        key=f"rad_name_{scan_id}",
+    review_name = st.text_input(
+        "Radiologist name",
+        value=radiologist_name,
+        key=f"review_name_{scan_id}",
     )
 
     registration_number = st.text_input(
         "Medical registration number",
-        key=f"rad_reg_{scan_id}",
+        key=f"registration_{scan_id}",
     )
 
     findings = st.text_area(
         "Findings",
-        height=180,
         placeholder=(
-            "Describe the radiographic findings..."
+            "Describe the radiological findings..."
         ),
+        height=180,
         key=f"findings_{scan_id}",
     )
 
     impression = st.text_area(
         "Impression",
-        height=140,
         placeholder=(
-            "Enter the final radiologist impression..."
+            "Enter the final radiological impression..."
         ),
+        height=140,
         key=f"impression_{scan_id}",
     )
 
     recommendations = st.text_area(
         "Recommendations",
-        height=120,
         placeholder=(
             "Enter recommendations if applicable..."
         ),
+        height=120,
         key=f"recommendations_{scan_id}",
     )
 
     remarks = st.text_area(
         "Radiologist remarks",
-        height=100,
         placeholder=(
-            "Additional clinical remarks..."
+            "Additional professional remarks..."
         ),
+        height=120,
         key=f"remarks_{scan_id}",
     )
 
     approval = st.checkbox(
-        "I have personally reviewed the medical "
-        "image and approve this final interpretation.",
+        "I confirm that I have personally reviewed "
+        "the examination and approve the clinical "
+        "interpretation entered above.",
         key=f"approval_{scan_id}",
     )
 
@@ -394,7 +660,7 @@ def show_radiologist():
     # ============================================================
 
     if st.button(
-        "✓ Approve & Generate Final Medical Report",
+        "✓ Approve Review & Generate Final Report",
         type="primary",
         use_container_width=True,
         key=f"approve_{scan_id}",
@@ -404,7 +670,7 @@ def show_radiologist():
         # VALIDATION
         # --------------------------------------------------------
 
-        if not radiologist_name.strip():
+        if not review_name.strip():
 
             st.error(
                 "Radiologist name is required."
@@ -415,7 +681,8 @@ def show_radiologist():
         if not registration_number.strip():
 
             st.error(
-                "Medical registration number is required."
+                "Medical registration number "
+                "is required."
             )
 
             return
@@ -439,54 +706,58 @@ def show_radiologist():
         if not approval:
 
             st.error(
-                "The radiologist must explicitly "
-                "approve the examination."
+                "You must explicitly approve "
+                "the examination."
+            )
+
+            return
+
+        # --------------------------------------------------------
+        # CURRENT USER
+        # --------------------------------------------------------
+
+        user = get_current_user()
+
+        if user is None:
+
+            st.error(
+                "Your session has expired."
             )
 
             return
 
         try:
 
+            supabase = get_supabase()
+
             reviewed_at = datetime.now()
 
             # ====================================================
-            # SAVE REVIEW
+            # SAVE RADIOLOGIST REVIEW
             # ====================================================
 
             review_response = (
                 supabase
                 .table("radiologist_reviews")
                 .insert({
-                    "scan_id":
-                        scan_id,
-
-                    "user_id":
-                        user.id,
-
+                    "scan_id": scan_id,
+                    "user_id": user.id,
                     "radiologist_name":
-                        radiologist_name.strip(),
-
+                        review_name.strip(),
                     "registration_number":
                         registration_number.strip(),
-
                     "findings":
                         findings.strip(),
-
                     "impression":
                         impression.strip(),
-
                     "recommendations":
                         recommendations.strip(),
-
                     "remarks":
                         remarks.strip(),
-
                     "status":
                         "APPROVED",
-
                     "approved":
                         True,
-
                     "reviewed_at":
                         reviewed_at.isoformat(),
                 })
@@ -496,7 +767,8 @@ def show_radiologist():
             if not review_response.data:
 
                 st.error(
-                    "The review could not be saved."
+                    "Radiologist review could "
+                    "not be saved."
                 )
 
                 return
@@ -506,175 +778,30 @@ def show_radiologist():
             )
 
             # ====================================================
-            # REPORT ID
+            # UPDATE REQUEST
             # ====================================================
 
-            report_id = (
-                "MED-R-"
-                + datetime.now().strftime("%Y%m%d")
-                + "-"
-                + uuid.uuid4().hex[:8].upper()
+            request_id = (
+                selected_request.get("id")
             )
 
-            # ====================================================
-            # GENERATE PDF
-            # ====================================================
+            if request_id:
 
-            report_buffer, generated_report_id = (
-                generate_pdf_report(
-
-                    patient_name=scan.get(
-                        "patient_name",
-                        "",
-                    ),
-
-                    patient_id=scan.get(
-                        "patient_id",
-                        "",
-                    ),
-
-                    state=scan.get(
-                        "patient_state",
-                        "",
-                    ),
-
-                    examination=scan.get(
-                        "examination",
-                        "",
-                    ),
-
-                    ai_prediction=prediction,
-
-                    ai_confidence=confidence,
-
-                    probabilities=probabilities,
-
-                    radiologist_name=
-                        radiologist_name.strip(),
-
-                    registration_number=
-                        registration_number.strip(),
-
-                    findings=
-                        findings.strip(),
-
-                    impression=
-                        impression.strip(),
-
-                    recommendations=
-                        recommendations.strip(),
-
-                    remarks=
-                        remarks.strip(),
-
-                    reviewed_at=
-                        reviewed_at.strftime(
-                            "%d %B %Y, %H:%M"
-                        ),
-
-                    xray_image=(
-                        image_bytes
-                        if scan.get(
-                            "examination"
-                        ) == "Chest X-ray"
-                        else None
-                    ),
-
-                    ultrasound_image=(
-                        image_bytes
-                        if scan.get(
-                            "examination"
-                        ) != "Chest X-ray"
-                        else None
-                    ),
-                )
-            )
-
-            pdf_bytes = (
-                report_buffer.getvalue()
-            )
-
-            # ====================================================
-            # SAVE PDF
-            # ====================================================
-
-            pdf_path = (
-                f"{user.id}/"
-                f"{scan.get('patient_id')}/"
-                f"{generated_report_id}.pdf"
-            )
-
-            supabase.storage.from_(
-                "medical-reports"
-            ).upload(
-                pdf_path,
-                pdf_bytes,
-                {
-                    "content-type":
-                        "application/pdf",
-                    "upsert":
-                        "false",
-                },
-            )
-
-            # ====================================================
-            # REPORT DATABASE
-            # ====================================================
-
-            report_response = (
-                supabase
-                .table("medical_reports")
-                .insert({
-                    "report_id":
-                        generated_report_id,
-
-                    "scan_id":
-                        scan_id,
-
-                    "review_id":
-                        review_id,
-
-                    "user_id":
-                        user.id,
-
-                    "patient_id":
-                        scan.get(
-                            "patient_id"
-                        ),
-
-                    "patient_name":
-                        scan.get(
-                            "patient_name"
-                        ),
-
-                    "patient_state":
-                        scan.get(
-                            "patient_state"
-                        ),
-
-                    "status":
-                        "APPROVED",
-
-                    "pdf_path":
-                        pdf_path,
-
-                    "approved_at":
-                        reviewed_at.isoformat(),
-                })
-                .execute()
-            )
-
-            if not report_response.data:
-
-                st.error(
-                    "Report generated but database "
-                    "record could not be created."
+                (
+                    supabase
+                    .table("radiologist_requests")
+                    .update({
+                        "status": "APPROVED",
+                    })
+                    .eq(
+                        "id",
+                        request_id,
+                    )
+                    .execute()
                 )
 
-                return
-
             # ====================================================
-            # MARK SCAN APPROVED
+            # UPDATE SCAN
             # ====================================================
 
             (
@@ -691,30 +818,229 @@ def show_radiologist():
                 .execute()
             )
 
+            # ====================================================
+            # GENERATE FINAL PDF
+            # ====================================================
+
+            probabilities = scan.get(
+                "probabilities",
+                {},
+            )
+
+            report_buffer, report_id = (
+                generate_pdf_report(
+                    patient_name=(
+                        scan.get(
+                            "patient_name",
+                            "",
+                        )
+                    ),
+                    patient_id=(
+                        scan.get(
+                            "patient_id",
+                            "",
+                        )
+                    ),
+                    state=(
+                        scan.get(
+                            "patient_state",
+                            "",
+                        )
+                    ),
+                    examination=(
+                        scan.get(
+                            "examination",
+                            "",
+                        )
+                    ),
+                    ai_prediction=(
+                        scan.get(
+                            "prediction",
+                            "",
+                        )
+                    ),
+                    ai_confidence=float(
+                        scan.get(
+                            "confidence",
+                            0,
+                        )
+                    ),
+                    probabilities=(
+                        probabilities
+                    ),
+                    radiologist_name=(
+                        review_name.strip()
+                    ),
+                    registration_number=(
+                        registration_number.strip()
+                    ),
+                    findings=(
+                        findings.strip()
+                    ),
+                    impression=(
+                        impression.strip()
+                    ),
+                    recommendations=(
+                        recommendations.strip()
+                    ),
+                    remarks=(
+                        remarks.strip()
+                    ),
+                    reviewed_at=(
+                        reviewed_at.strftime(
+                            "%d %B %Y, %H:%M"
+                        )
+                    ),
+                    xray_image=(
+                        image_bytes
+                        if (
+                            scan.get(
+                                "examination"
+                            )
+                            == "Chest X-ray"
+                        )
+                        else None
+                    ),
+                    ultrasound_image=(
+                        image_bytes
+                        if (
+                            scan.get(
+                                "examination"
+                            )
+                            == "Breast Ultrasound"
+                        )
+                        else None
+                    ),
+                )
+            )
+
+            pdf_bytes = (
+                report_buffer.getvalue()
+            )
+
+            # ====================================================
+            # SAVE PDF
+            # ====================================================
+
+            patient_id = scan.get(
+                "patient_id"
+            )
+
+            pdf_path = (
+                f"{user.id}/"
+                f"{patient_id}/"
+                f"{report_id}.pdf"
+            )
+
+            supabase.storage.from_(
+                "medical-reports"
+            ).upload(
+                pdf_path,
+                pdf_bytes,
+                {
+                    "content-type":
+                        "application/pdf",
+                    "upsert":
+                        "false",
+                },
+            )
+
+            # ====================================================
+            # SAVE REPORT
+            # ====================================================
+
+            report_response = (
+                supabase
+                .table("medical_reports")
+                .insert({
+                    "report_id":
+                        report_id,
+                    "scan_id":
+                        scan_id,
+                    "review_id":
+                        review_id,
+                    "user_id":
+                        scan.get(
+                            "user_id"
+                        ),
+                    "patient_id":
+                        patient_id,
+                    "patient_name":
+                        scan.get(
+                            "patient_name"
+                        ),
+                    "patient_state":
+                        scan.get(
+                            "patient_state"
+                        ),
+                    "status":
+                        "APPROVED",
+                    "pdf_path":
+                        pdf_path,
+                    "approved_at":
+                        reviewed_at.isoformat(),
+                })
+                .execute()
+            )
+
+            if not report_response.data:
+
+                st.error(
+                    "The report was generated but "
+                    "could not be registered."
+                )
+
+                return
+
+            # ====================================================
+            # SUCCESS
+            # ====================================================
+
             st.success(
                 "✅ Radiologist review approved."
             )
 
             st.success(
-                f"✅ Final report generated: "
-                f"{generated_report_id}"
+                f"✅ Final medical report generated: "
+                f"{report_id}"
             )
 
             st.download_button(
-                "⬇️ Download Approved Report",
+                label=(
+                    "⬇️ Download Final Medical Report"
+                ),
                 data=pdf_bytes,
                 file_name=(
-                    f"{generated_report_id}.pdf"
+                    f"{report_id}.pdf"
                 ),
                 mime="application/pdf",
                 type="primary",
                 use_container_width=True,
+                key=f"radiologist_download_{report_id}",
             )
+
+            st.info(
+                "The patient can now access the "
+                "approved final report."
+            )
+
+            st.rerun()
 
         except Exception as error:
 
             st.error(
-                "The examination could not be approved."
+                "Could not complete the radiologist review."
             )
 
             st.exception(error)
+
+    # ============================================================
+    # SECURITY NOTICE
+    # ============================================================
+
+    st.divider()
+
+    st.caption(
+        "Medusa AI Clinical Review Portal • "
+        "Authorized radiologists only"
+    )
