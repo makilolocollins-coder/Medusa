@@ -2,6 +2,15 @@
 # MAMMOSENSE PNEUMONIA V2
 # 3D RESNET-18 PSEUDO-3D CHEST X-RAY CLASSIFIER
 #
+# TRAINING ARCHITECTURE:
+#   stem
+#   layer1
+#   layer2
+#   layer3
+#   layer4
+#   avgpool
+#   fc
+#
 # INPUT:
 #   [B, C, D, H, W]
 #   [1, 1, 16, 224, 224]
@@ -9,10 +18,6 @@
 # CLASSES:
 #   0 = NORMAL
 #   1 = PNEUMONIA
-#
-# CHECKPOINT:
-#   Makky07/Mammosense_pneumonia
-#   mammosense_pneumonia_v2.pt
 # ================================================================
 
 import torch
@@ -33,6 +38,7 @@ MODEL_FILENAME = "mammosense_pneumonia_v2.pt"
 
 IMAGE_SIZE = 224
 DEPTH = 16
+NUM_CLASSES = 2
 
 CLASS_NAMES = [
     "NORMAL",
@@ -40,12 +46,14 @@ CLASS_NAMES = [
 ]
 
 DEVICE = torch.device(
-    "cuda" if torch.cuda.is_available() else "cpu"
+    "cuda"
+    if torch.cuda.is_available()
+    else "cpu"
 )
 
 
 # ================================================================
-# 3D BASIC BLOCK
+# 3D RESNET BASIC BLOCK
 # ================================================================
 
 class BasicBlock3D(nn.Module):
@@ -62,8 +70,8 @@ class BasicBlock3D(nn.Module):
         super().__init__()
 
         self.conv1 = nn.Conv3d(
-            in_channels,
-            out_channels,
+            in_channels=in_channels,
+            out_channels=out_channels,
             kernel_size=3,
             stride=stride,
             padding=1,
@@ -79,8 +87,8 @@ class BasicBlock3D(nn.Module):
         )
 
         self.conv2 = nn.Conv3d(
-            out_channels,
-            out_channels,
+            in_channels=out_channels,
+            out_channels=out_channels,
             kernel_size=3,
             stride=1,
             padding=1,
@@ -99,8 +107,8 @@ class BasicBlock3D(nn.Module):
             self.downsample = nn.Sequential(
 
                 nn.Conv3d(
-                    in_channels,
-                    out_channels,
+                    in_channels=in_channels,
+                    out_channels=out_channels,
                     kernel_size=1,
                     stride=stride,
                     bias=False,
@@ -120,14 +128,20 @@ class BasicBlock3D(nn.Module):
         identity = x
 
         out = self.conv1(x)
+
         out = self.bn1(out)
+
         out = self.relu(out)
 
         out = self.conv2(out)
+
         out = self.bn2(out)
 
         if self.downsample is not None:
-            identity = self.downsample(x)
+
+            identity = self.downsample(
+                identity
+            )
 
         out = out + identity
 
@@ -139,24 +153,14 @@ class BasicBlock3D(nn.Module):
 # ================================================================
 # 3D RESNET-18
 #
-# IMPORTANT:
-# This architecture exactly matches the architecture used during
-# training.
-#
-# The trained checkpoint contains:
-#
-#   stem.0.weight
-#   stem.1.weight
-#   ...
-#
-# Therefore we MUST use self.stem here.
+# THIS MATCHES THE TRAINING CODE PROVIDED BY THE USER.
 # ================================================================
 
 class ResNet3D18(nn.Module):
 
     def __init__(
         self,
-        num_classes=2,
+        num_classes=NUM_CLASSES,
     ):
 
         super().__init__()
@@ -170,8 +174,8 @@ class ResNet3D18(nn.Module):
         self.stem = nn.Sequential(
 
             nn.Conv3d(
-                1,
-                64,
+                in_channels=1,
+                out_channels=64,
                 kernel_size=7,
                 stride=(1, 2, 2),
                 padding=3,
@@ -198,26 +202,26 @@ class ResNet3D18(nn.Module):
         # --------------------------------------------------------
 
         self.layer1 = self._make_layer(
-            64,
-            2,
+            out_channels=64,
+            blocks=2,
             stride=1,
         )
 
         self.layer2 = self._make_layer(
-            128,
-            2,
+            out_channels=128,
+            blocks=2,
             stride=2,
         )
 
         self.layer3 = self._make_layer(
-            256,
-            2,
+            out_channels=256,
+            blocks=2,
             stride=2,
         )
 
         self.layer4 = self._make_layer(
-            512,
-            2,
+            out_channels=512,
+            blocks=2,
             stride=2,
         )
 
@@ -234,10 +238,6 @@ class ResNet3D18(nn.Module):
             num_classes,
         )
 
-    # ============================================================
-    # MAKE RESNET LAYER
-    # ============================================================
-
     def _make_layer(
         self,
         out_channels,
@@ -249,9 +249,9 @@ class ResNet3D18(nn.Module):
 
         layers.append(
             BasicBlock3D(
-                self.in_channels,
-                out_channels,
-                stride,
+                in_channels=self.in_channels,
+                out_channels=out_channels,
+                stride=stride,
             )
         )
 
@@ -264,8 +264,8 @@ class ResNet3D18(nn.Module):
 
             layers.append(
                 BasicBlock3D(
-                    out_channels,
-                    out_channels,
+                    in_channels=out_channels,
+                    out_channels=out_channels,
                     stride=1,
                 )
             )
@@ -274,11 +274,28 @@ class ResNet3D18(nn.Module):
             *layers
         )
 
-    # ============================================================
-    # FORWARD
-    # ============================================================
-
     def forward(self, x):
+
+        # --------------------------------------------------------
+        # ABSOLUTE INPUT VALIDATION
+        # --------------------------------------------------------
+
+        if x.ndim != 5:
+
+            raise RuntimeError(
+                "MammoSense Pneumonia received "
+                f"{x.ndim}D input {tuple(x.shape)}. "
+                "Expected [B,C,D,H,W], e.g. "
+                "[1,1,16,224,224]."
+            )
+
+        if x.shape[1] != 1:
+
+            raise RuntimeError(
+                "MammoSense Pneumonia expects "
+                f"1 input channel, received "
+                f"{x.shape[1]}."
+            )
 
         x = self.stem(x)
 
@@ -294,7 +311,7 @@ class ResNet3D18(nn.Module):
 
         x = torch.flatten(
             x,
-            1,
+            start_dim=1,
         )
 
         x = self.fc(x)
@@ -303,7 +320,14 @@ class ResNet3D18(nn.Module):
 
 
 # ================================================================
-# IMAGE PREPROCESSING
+# PREPROCESSING
+#
+# MUST MATCH TRAINING:
+#
+# Grayscale
+# Resize 224x224
+# ToTensor
+# Normalize 0.485 / 0.229
 # ================================================================
 
 transform = transforms.Compose([
@@ -329,7 +353,7 @@ transform = transforms.Compose([
 
 
 # ================================================================
-# GLOBAL MODEL CACHE
+# MODEL CACHE
 # ================================================================
 
 _model = None
@@ -343,15 +367,12 @@ def load_model():
 
     global _model
 
-    # ------------------------------------------------------------
-    # Return cached model
-    # ------------------------------------------------------------
-
     if _model is not None:
+
         return _model
 
     # ------------------------------------------------------------
-    # Download checkpoint
+    # DOWNLOAD FROM HUGGING FACE
     # ------------------------------------------------------------
 
     model_path = hf_hub_download(
@@ -360,15 +381,15 @@ def load_model():
     )
 
     # ------------------------------------------------------------
-    # Create EXACT training architecture
+    # CREATE EXACT TRAINING ARCHITECTURE
     # ------------------------------------------------------------
 
     model = ResNet3D18(
-        num_classes=2,
+        num_classes=NUM_CLASSES
     )
 
     # ------------------------------------------------------------
-    # Load checkpoint
+    # LOAD CHECKPOINT
     # ------------------------------------------------------------
 
     checkpoint = torch.load(
@@ -378,7 +399,7 @@ def load_model():
     )
 
     # ------------------------------------------------------------
-    # Extract model weights
+    # EXTRACT STATE DICT
     # ------------------------------------------------------------
 
     if isinstance(
@@ -388,19 +409,15 @@ def load_model():
 
         if "model_state_dict" in checkpoint:
 
-            state_dict = (
-                checkpoint[
-                    "model_state_dict"
-                ]
-            )
+            state_dict = checkpoint[
+                "model_state_dict"
+            ]
 
         elif "state_dict" in checkpoint:
 
-            state_dict = (
-                checkpoint[
-                    "state_dict"
-                ]
-            )
+            state_dict = checkpoint[
+                "state_dict"
+            ]
 
         else:
 
@@ -411,7 +428,7 @@ def load_model():
         state_dict = checkpoint
 
     # ------------------------------------------------------------
-    # Remove common training prefixes
+    # REMOVE COMMON PREFIXES
     # ------------------------------------------------------------
 
     cleaned_state_dict = {}
@@ -441,10 +458,10 @@ def load_model():
         ] = value
 
     # ------------------------------------------------------------
-    # Verify architecture before loading
+    # ARCHITECTURE CHECK
     # ------------------------------------------------------------
 
-    expected_keys = set(
+    model_keys = set(
         model.state_dict().keys()
     )
 
@@ -452,37 +469,34 @@ def load_model():
         cleaned_state_dict.keys()
     )
 
-    missing_keys = (
-        expected_keys
+    missing = (
+        model_keys
         - checkpoint_keys
     )
 
-    unexpected_keys = (
+    unexpected = (
         checkpoint_keys
-        - expected_keys
+        - model_keys
     )
 
-    if missing_keys:
+    if missing:
 
         raise RuntimeError(
-            "MammoSense Pneumonia checkpoint "
-            "does not match the deployed model "
-            "architecture.\n\n"
-            f"Missing keys:\n"
-            f"{sorted(missing_keys)[:20]}"
+            "Pneumonia checkpoint is missing "
+            f"{len(missing)} model parameters.\n"
+            f"Examples: {sorted(missing)[:10]}"
         )
 
-    if unexpected_keys:
+    if unexpected:
 
         raise RuntimeError(
-            "MammoSense Pneumonia checkpoint "
-            "contains unexpected parameters.\n\n"
-            f"Unexpected keys:\n"
-            f"{sorted(unexpected_keys)[:20]}"
+            "Pneumonia checkpoint contains "
+            f"{len(unexpected)} unexpected parameters.\n"
+            f"Examples: {sorted(unexpected)[:10]}"
         )
 
     # ------------------------------------------------------------
-    # Load weights
+    # LOAD WEIGHTS
     # ------------------------------------------------------------
 
     model.load_state_dict(
@@ -491,26 +505,156 @@ def load_model():
     )
 
     # ------------------------------------------------------------
-    # Device
+    # DEVICE + EVAL
     # ------------------------------------------------------------
 
-    model.to(
+    model = model.to(
         DEVICE
     )
 
-    # ------------------------------------------------------------
-    # Evaluation mode
-    # ------------------------------------------------------------
-
     model.eval()
-
-    # ------------------------------------------------------------
-    # Cache
-    # ------------------------------------------------------------
 
     _model = model
 
     return _model
+
+
+# ================================================================
+# CREATE PSEUDO-3D INPUT
+#
+# THIS IS THE IMPORTANT FIX.
+#
+# Input after transform:
+#
+#   [1,224,224]
+#
+# We explicitly create:
+#
+#   [1,1,224,224]
+#
+# then:
+#
+#   [1,1,16,224,224]
+#
+# There is NO ambiguity about which dimension is depth.
+# ================================================================
+
+def prepare_input(image):
+
+    if not isinstance(
+        image,
+        Image.Image,
+    ):
+
+        image = Image.open(
+            image
+        )
+
+    # ------------------------------------------------------------
+    # GRAYSCALE
+    # ------------------------------------------------------------
+
+    image = image.convert(
+        "L"
+    )
+
+    # ------------------------------------------------------------
+    # 2D PREPROCESSING
+    # ------------------------------------------------------------
+
+    tensor = transform(
+        image
+    )
+
+    # Expected:
+    #
+    # [1,224,224]
+
+    if tensor.shape != (
+        1,
+        IMAGE_SIZE,
+        IMAGE_SIZE,
+    ):
+
+        raise RuntimeError(
+            "Unexpected 2D preprocessing "
+            f"shape: {tuple(tensor.shape)}. "
+            "Expected [1,224,224]."
+        )
+
+    # ------------------------------------------------------------
+    # ADD BATCH DIMENSION
+    #
+    # [1,224,224]
+    # ->
+    # [1,1,224,224]
+    #
+    # This is [B,C,H,W].
+    # ------------------------------------------------------------
+
+    tensor = tensor.unsqueeze(
+        0
+    )
+
+    # ------------------------------------------------------------
+    # ADD DEPTH DIMENSION
+    #
+    # [1,1,224,224]
+    # ->
+    # [1,1,1,224,224]
+    #
+    # This is [B,C,D,H,W].
+    # ------------------------------------------------------------
+
+    tensor = tensor.unsqueeze(
+        2
+    )
+
+    # ------------------------------------------------------------
+    # REPLICATE ALONG DEPTH
+    #
+    # [1,1,1,224,224]
+    # ->
+    # [1,1,16,224,224]
+    # ------------------------------------------------------------
+
+    tensor = tensor.repeat(
+        1,
+        1,
+        DEPTH,
+        1,
+        1,
+    )
+
+    # ------------------------------------------------------------
+    # FINAL VALIDATION
+    # ------------------------------------------------------------
+
+    expected = (
+        1,
+        1,
+        DEPTH,
+        IMAGE_SIZE,
+        IMAGE_SIZE,
+    )
+
+    if tensor.shape != expected:
+
+        raise RuntimeError(
+            "Pneumonia input construction "
+            "failed.\n"
+            f"Expected: {expected}\n"
+            f"Received: {tuple(tensor.shape)}"
+        )
+
+    if tensor.ndim != 5:
+
+        raise RuntimeError(
+            "Pneumonia input MUST be 5D. "
+            f"Received {tensor.ndim}D."
+        )
+
+    return tensor.float()
 
 
 # ================================================================
@@ -522,195 +666,70 @@ def predict(image):
 
     model = load_model()
 
-    # ============================================================
-    # 1. LOAD IMAGE
-    # ============================================================
+    # ------------------------------------------------------------
+    # PREPARE EXACT 5D INPUT
+    # ------------------------------------------------------------
 
-    if not isinstance(
-        image,
-        Image.Image,
-    ):
-
-        image = Image.open(
-            image
-        )
-
-    # ============================================================
-    # 2. GRAYSCALE
-    # ============================================================
-
-    image = image.convert(
-        "L"
-    )
-
-    # ============================================================
-    # 3. 2D PREPROCESSING
-    #
-    # Result:
-    #
-    # [C, H, W]
-    #
-    # [1, 224, 224]
-    # ============================================================
-
-    tensor = transform(
+    tensor = prepare_input(
         image
     )
 
-    if tensor.ndim != 3:
-
-        raise RuntimeError(
-            "Pneumonia preprocessing error: "
-            f"expected 3D tensor [C,H,W], "
-            f"got {tuple(tensor.shape)}"
-        )
-
-    if tensor.shape != (
-        1,
-        IMAGE_SIZE,
-        IMAGE_SIZE,
-    ):
-
-        raise RuntimeError(
-            "Pneumonia preprocessing error: "
-            f"expected [1,224,224], "
-            f"got {tuple(tensor.shape)}"
-        )
-
-    # ============================================================
-    # 4. CREATE PSEUDO-3D VOLUME
-    #
-    # Current:
-    #
-    # [1, 224, 224]
-    #
-    # Add depth:
-    #
-    # [1, 1, 224, 224]
-    #
-    # Repeat depth:
-    #
-    # [1, 16, 224, 224]
-    #
-    # This represents:
-    #
-    # [C, D, H, W]
-    # ============================================================
-
-    tensor = tensor.unsqueeze(
-        1
-    )
-
-    tensor = tensor.repeat(
-        1,
-        DEPTH,
-        1,
-        1,
-    )
-
-    if tensor.shape != (
-        1,
-        DEPTH,
-        IMAGE_SIZE,
-        IMAGE_SIZE,
-    ):
-
-        raise RuntimeError(
-            "Pseudo-3D construction failed: "
-            f"expected [1,16,224,224], "
-            f"got {tuple(tensor.shape)}"
-        )
-
-    # ============================================================
-    # 5. ADD BATCH DIMENSION
-    #
-    # Current:
-    #
-    # [C, D, H, W]
-    #
-    # Add batch:
-    #
-    # [B, C, D, H, W]
-    #
-    # FINAL:
-    #
-    # [1, 1, 16, 224, 224]
-    # ============================================================
-
-    tensor = tensor.unsqueeze(
-        0
-    )
-
-    # ============================================================
-    # 6. HARD 5D VALIDATION
-    # ============================================================
-
-    if tensor.ndim != 5:
-
-        raise RuntimeError(
-            "FATAL PNEUMONIA INPUT ERROR: "
-            f"3D ResNet requires a 5D tensor "
-            f"[B,C,D,H,W], but received "
-            f"{tensor.ndim}D: "
-            f"{tuple(tensor.shape)}"
-        )
-
-    expected_shape = (
-        1,
-        1,
-        DEPTH,
-        IMAGE_SIZE,
-        IMAGE_SIZE,
-    )
-
-    if tensor.shape != expected_shape:
-
-        raise RuntimeError(
-            "FATAL PNEUMONIA SHAPE ERROR: "
-            f"expected {expected_shape}, "
-            f"received {tuple(tensor.shape)}"
-        )
-
-    # ============================================================
-    # 7. MOVE TO DEVICE
-    # ============================================================
+    # ------------------------------------------------------------
+    # MOVE TO DEVICE
+    # ------------------------------------------------------------
 
     tensor = tensor.to(
         DEVICE,
-        dtype=torch.float32,
+        non_blocking=True,
     )
 
-    # ============================================================
-    # 8. FINAL DEVICE/SHAPE CHECK
-    # ============================================================
+    # ------------------------------------------------------------
+    # FINAL CHECK IMMEDIATELY BEFORE MODEL
+    # ------------------------------------------------------------
 
     if tensor.ndim != 5:
 
         raise RuntimeError(
-            "Pneumonia tensor is not 5D "
-            "immediately before inference."
+            "FATAL: Tensor entering "
+            "ResNet3D18 is not 5D.\n"
+            f"Shape: {tuple(tensor.shape)}"
         )
 
-    # ============================================================
-    # 9. MODEL INFERENCE
-    # ============================================================
+    if tuple(tensor.shape) != (
+        1,
+        1,
+        16,
+        224,
+        224,
+    ):
+
+        raise RuntimeError(
+            "FATAL: Incorrect tensor entering "
+            "Pneumonia model.\n"
+            "Expected: [1,1,16,224,224]\n"
+            f"Received: {tuple(tensor.shape)}"
+        )
+
+    # ------------------------------------------------------------
+    # INFERENCE
+    # ------------------------------------------------------------
 
     logits = model(
         tensor
     )
 
-    # ============================================================
-    # 10. SOFTMAX
-    # ============================================================
+    # ------------------------------------------------------------
+    # SOFTMAX
+    # ------------------------------------------------------------
 
     probabilities = torch.softmax(
         logits,
         dim=1,
     )[0]
 
-    # ============================================================
-    # 11. CLASS PROBABILITIES
-    # ============================================================
+    # ------------------------------------------------------------
+    # PROBABILITIES
+    # ------------------------------------------------------------
 
     normal_probability = float(
         probabilities[0].item()
@@ -729,9 +748,9 @@ def predict(image):
             pneumonia_probability,
     }
 
-    # ============================================================
-    # 12. PREDICTION
-    # ============================================================
+    # ------------------------------------------------------------
+    # PREDICTION
+    # ------------------------------------------------------------
 
     predicted_index = int(
         torch.argmax(
@@ -749,9 +768,9 @@ def predict(image):
         ].item()
     )
 
-    # ============================================================
-    # 13. RETURN STANDARD MEDUSА FORMAT
-    # ============================================================
+    # ------------------------------------------------------------
+    # RESULT
+    # ------------------------------------------------------------
 
     return {
 
