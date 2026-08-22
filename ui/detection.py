@@ -31,18 +31,18 @@ def show_detection():
     # ========================================================
 
     model_choice = st.selectbox(
-    "Select AI Model",
-    [
-        "MammoSense — Breast Ultrasound",
-        "MammoSense Pneumonia — Chest X-ray",
-    ],
-    key="detection_model",
-)
+        "Select AI Model",
+        [
+            "MammoSense — Breast Ultrasound",
+            "MammoSense Pneumonia — Chest X-ray",
+        ],
+        key="detection_model",
+    )
 
-is_pneumonia = (
-    model_choice
-    == "MammoSense Pneumonia — Chest X-ray"
-)
+    is_pneumonia = (
+        model_choice
+        == "MammoSense Pneumonia — Chest X-ray"
+    )
 
     # ========================================================
     # MODEL INFORMATION
@@ -55,16 +55,14 @@ is_pneumonia = (
             "for pneumonia screening."
         )
 
-        uploader_label = (
-            "Upload chest X-ray"
-        )
-
-        upload_key = (
-            "pneumonia_upload"
-        )
+        uploader_label = "Upload chest X-ray"
 
         analyse_label = (
             "Analyse with Pneumonia AI"
+        )
+
+        model_name = (
+            "MammoSense Pneumonia V2"
         )
 
     else:
@@ -78,23 +76,25 @@ is_pneumonia = (
             "Upload breast ultrasound"
         )
 
-        upload_key = (
-            "mammosense_upload"
-        )
-
         analyse_label = (
             "Analyse with MammoSense"
         )
+
+        model_name = "MammoSense V2"
 
     # ========================================================
     # UPLOAD
     # ========================================================
 
     uploaded = st.file_uploader(
-    "Upload chest X-ray" if is_pneumonia
-    else "Upload ultrasound image",
-    type=["jpg", "jpeg", "png", "webp"],
-    key="medical_image_upload",
+        uploader_label,
+        type=[
+            "jpg",
+            "jpeg",
+            "png",
+            "webp",
+        ],
+        key="medical_image_upload",
     )
 
     if uploaded is None:
@@ -105,13 +105,34 @@ is_pneumonia = (
 
         return
 
-    image = Image.open(
-        uploaded
-    ).convert("RGB")
+    # ========================================================
+    # LOAD IMAGE
+    # ========================================================
+
+    try:
+
+        image = Image.open(
+            uploaded
+        ).convert("RGB")
+
+    except Exception as error:
+
+        st.error(
+            "The uploaded file could not "
+            "be opened as an image."
+        )
+
+        st.exception(error)
+
+        return
 
     st.image(
         image,
-        caption="Uploaded image",
+        caption=(
+            "Uploaded chest X-ray"
+            if is_pneumonia
+            else "Uploaded breast ultrasound"
+        ),
         use_container_width=True,
     )
 
@@ -128,32 +149,45 @@ is_pneumonia = (
 
         try:
 
-            with st.spinner("Analysing image..."):
+            with st.spinner(
+                "Analysing image..."
+            ):
 
-    if is_pneumonia:
+                # --------------------------------------------
+                # PNEUMONIA MODEL
+                # --------------------------------------------
 
-        load_pneumonia_model()
+                if is_pneumonia:
 
-        result = predict_pneumonia(image)
+                    load_pneumonia_model()
 
-        model_name = "MammoSense Pneumonia V2"
+                    result = predict_pneumonia(
+                        image
+                    )
 
-    else:
+                # --------------------------------------------
+                # BREAST ULTRASOUND MODEL
+                # --------------------------------------------
 
-        load_model()
+                else:
 
-        result = predict(image)
+                    load_mammo_model()
 
-        model_name = "MammoSense V2"
+                    result = predict_mammo(
+                        image
+                    )
 
+            # =================================================
+            # SUPABASE
+            # =================================================
 
             supabase = get_supabase()
 
-            user = (
+            user_response = (
                 supabase.auth.get_user()
             )
 
-            if not user.user:
+            if not user_response.user:
 
                 st.error(
                     "Please log in again."
@@ -161,10 +195,12 @@ is_pneumonia = (
 
                 return
 
-            user_id = user.user.id
+            user_id = (
+                user_response.user.id
+            )
 
             # =================================================
-            # SAVE IMAGE
+            # SAVE IMAGE TO STORAGE
             # =================================================
 
             file_extension = (
@@ -189,11 +225,10 @@ is_pneumonia = (
                 image_path,
                 image_bytes,
                 {
-                    "content-type":
-                        uploaded.type,
-
-                    "upsert":
-                        "false",
+                    "content-type": (
+                        uploaded.type
+                    ),
+                    "upsert": "false",
                 },
             )
 
@@ -205,33 +240,42 @@ is_pneumonia = (
                 supabase
                 .table("ai_scans")
                 .insert({
-                    "user_id":
-                        user_id,
+                    "user_id": user_id,
 
-                    "model":
-                        model_name,
+                    "model": model_name,
 
-                    "prediction":
-                        result["prediction"],
+                    "prediction": (
+                        result["prediction"]
+                    ),
 
-                    "confidence":
-                        result["confidence"],
+                    "confidence": (
+                        result["confidence"]
+                    ),
 
-                    "probabilities":
-                        result["probabilities"],
+                    "probabilities": (
+                        result["probabilities"]
+                    ),
 
-                    "image_path":
-                        image_path,
+                    "image_path": image_path,
                 })
                 .execute()
             )
+
+            if not response.data:
+
+                st.error(
+                    "The scan was analysed but "
+                    "could not be saved."
+                )
+
+                return
 
             scan_id = (
                 response.data[0]["id"]
             )
 
             # =================================================
-            # SESSION
+            # SESSION STATE
             # =================================================
 
             st.session_state.scan_result = (
@@ -250,19 +294,26 @@ is_pneumonia = (
                 model_name
             )
 
-            st.session_state.history = (
-                st.session_state.get(
-                    "history",
-                    []
-                )
+            st.session_state.scan_type = (
+                "pneumonia"
+                if is_pneumonia
+                else "mammosense"
             )
 
-            st.session_state.history.append(
-                result
-            )
+            if "history" not in (
+                st.session_state
+            ):
+
+                st.session_state.history = []
+
+            st.session_state.history.append({
+                "model": model_name,
+                "result": result,
+                "scan_id": scan_id,
+            })
 
             st.success(
-                "Analysis completed."
+                "✅ Analysis completed."
             )
 
         except Exception as error:
@@ -283,6 +334,7 @@ is_pneumonia = (
     )
 
     if result is None:
+
         return
 
     st.divider()
@@ -291,48 +343,84 @@ is_pneumonia = (
         "🤖 AI Result"
     )
 
+    current_model = (
+        st.session_state.get(
+            "scan_model",
+            model_name,
+        )
+    )
+
+    st.caption(
+        f"Model: {current_model}"
+    )
+
+    # ========================================================
+    # MAIN RESULT
+    # ========================================================
+
     col1, col2 = st.columns(2)
 
     with col1:
 
         st.metric(
             "Finding",
-            result["prediction"],
+            result.get(
+                "prediction",
+                "Unknown",
+            ),
         )
 
     with col2:
 
+        confidence = float(
+            result.get(
+                "confidence",
+                0,
+            )
+        )
+
         st.metric(
             "Confidence",
-            f"{result['confidence']:.1%}",
+            f"{confidence:.1%}",
         )
 
     # ========================================================
     # PROBABILITIES
     # ========================================================
 
-    st.subheader(
-        "Probability Breakdown"
+    probabilities = result.get(
+        "probabilities",
+        {},
     )
 
-    for name, value in (
-        result["probabilities"]
-        .items()
-    ):
+    if isinstance(
+        probabilities,
+        dict,
+    ) and probabilities:
 
-        st.write(
-            f"**{name}: {value:.1%}**"
+        st.subheader(
+            "Probability Breakdown"
         )
 
-        st.progress(
-            min(
-                max(
-                    float(value),
-                    0,
-                ),
-                1,
+        for name, value in (
+            probabilities.items()
+        ):
+
+            value = float(value)
+
+            st.write(
+                f"**{name}: {value:.1%}**"
             )
-        )
+
+            st.progress(
+                min(
+                    max(
+                        value,
+                        0.0,
+                    ),
+                    1.0,
+                )
+            )
 
     # ========================================================
     # RADIOLOGIST REVIEW
@@ -358,21 +446,23 @@ is_pneumonia = (
 
         try:
 
-            supabase = (
-                get_supabase()
-            )
+            supabase = get_supabase()
 
-            user = (
+            user_response = (
                 supabase.auth.get_user()
             )
 
-            if not user.user:
+            if not user_response.user:
 
                 st.error(
                     "Please log in again."
                 )
 
                 return
+
+            current_user_id = (
+                user_response.user.id
+            )
 
             scan_id = (
                 st.session_state.get(
@@ -403,21 +493,26 @@ is_pneumonia = (
                 )
                 .eq(
                     "user_id",
-                    user.user.id,
+                    current_user_id,
                 )
                 .execute()
                 .data
+                or []
             )
 
             if existing:
+
+                status = existing[0].get(
+                    "status",
+                    "Unknown",
+                )
 
                 st.info(
                     "Review already requested."
                 )
 
                 st.caption(
-                    f"Status: "
-                    f"{existing[0]['status']}"
+                    f"Status: {status}"
                 )
 
             else:
@@ -429,7 +524,7 @@ is_pneumonia = (
                     )
                     .insert({
                         "user_id":
-                            user.user.id,
+                            current_user_id,
 
                         "scan_id":
                             scan_id,
@@ -510,21 +605,23 @@ is_pneumonia = (
 
         try:
 
-            supabase = (
-                get_supabase()
-            )
+            supabase = get_supabase()
 
-            user = (
+            user_response = (
                 supabase.auth.get_user()
             )
 
-            if not user.user:
+            if not user_response.user:
 
                 st.error(
                     "Please log in again."
                 )
 
                 return
+
+            current_user_id = (
+                user_response.user.id
+            )
 
             scan_id = (
                 st.session_state.get(
@@ -546,7 +643,7 @@ is_pneumonia = (
                 .table("consultations")
                 .insert({
                     "user_id":
-                        user.user.id,
+                        current_user_id,
 
                     "scan_id":
                         scan_id,
