@@ -1,33 +1,122 @@
+import uuid
+
 import streamlit as st
 from PIL import Image
 
 from ui.background import set_background
 from utils.supabase_client import get_supabase
-from ai.mammosense import load_model, predict
+
+from ai.mammosense import (
+    load_model as load_mammo_model,
+    predict as predict_mammo,
+)
+
+from ai.pneumonia import (
+    load_model as load_pneumonia_model,
+    predict as predict_pneumonia,
+)
 
 
 def show_detection():
 
     set_background("detection.jpg")
 
-    st.title("🧬 MammoSense")
-    st.caption("AI-assisted breast ultrasound screening")
+    st.title("🧬 AI Detection")
+    st.caption(
+        "AI-assisted medical image screening"
+    )
+
+    # ========================================================
+    # MODEL SELECTOR
+    # ========================================================
+
+    model_choice = st.selectbox(
+        "Select AI Model",
+        [
+            "MammoSense — Breast Ultrasound",
+            "MammoSense Pneumonia — Chest X-ray",
+        ],
+        key="ai_model_selector",
+    )
+
+    is_pneumonia = (
+        model_choice.startswith(
+            "MammoSense Pneumonia"
+        )
+    )
+
+    # ========================================================
+    # MODEL INFORMATION
+    # ========================================================
+
+    if is_pneumonia:
+
+        st.info(
+            "🫁 Upload a chest X-ray "
+            "for pneumonia screening."
+        )
+
+        uploader_label = (
+            "Upload chest X-ray"
+        )
+
+        upload_key = (
+            "pneumonia_upload"
+        )
+
+        analyse_label = (
+            "Analyse with Pneumonia AI"
+        )
+
+    else:
+
+        st.info(
+            "🩻 Upload a breast ultrasound "
+            "for MammoSense screening."
+        )
+
+        uploader_label = (
+            "Upload breast ultrasound"
+        )
+
+        upload_key = (
+            "mammosense_upload"
+        )
+
+        analyse_label = (
+            "Analyse with MammoSense"
+        )
+
+    # ========================================================
+    # UPLOAD
+    # ========================================================
 
     uploaded = st.file_uploader(
-        "Upload ultrasound image",
-        type=["jpg", "jpeg", "png", "webp"],
-        key="mammosense_upload",
+        uploader_label,
+        type=[
+            "jpg",
+            "jpeg",
+            "png",
+            "webp",
+        ],
+        key=upload_key,
     )
 
     if uploaded is None:
-        st.info("Upload an ultrasound image to begin.")
+
+        st.info(
+            "Upload an image to begin."
+        )
+
         return
 
-    image = Image.open(uploaded)
+    image = Image.open(
+        uploaded
+    ).convert("RGB")
 
     st.image(
         image,
-        caption="Uploaded ultrasound",
+        caption="Uploaded image",
         use_container_width=True,
     )
 
@@ -36,44 +125,77 @@ def show_detection():
     # ========================================================
 
     if st.button(
-        "Analyse with MammoSense",
+        analyse_label,
         type="primary",
         use_container_width=True,
-        key="analyse_mammo",
+        key="analyse_selected_model",
     ):
 
         try:
 
-            with st.spinner("Analysing ultrasound..."):
+            with st.spinner(
+                "Analysing image..."
+            ):
 
-                load_model()
+                if is_pneumonia:
 
-                result = predict(image)
+                    load_pneumonia_model()
+
+                    result = predict_pneumonia(
+                        image
+                    )
+
+                    model_name = (
+                        "MammoSense Pneumonia V2"
+                    )
+
+                else:
+
+                    load_mammo_model()
+
+                    result = predict_mammo(
+                        image
+                    )
+
+                    model_name = (
+                        "MammoSense V2"
+                    )
 
             supabase = get_supabase()
 
-            user = supabase.auth.get_user()
+            user = (
+                supabase.auth.get_user()
+            )
 
             if not user.user:
 
-                st.error("Please log in again.")
+                st.error(
+                    "Please log in again."
+                )
+
                 return
 
             user_id = user.user.id
 
-            # ------------------------------------------------
-            # SAVE IMAGE TO SUPABASE STORAGE
-            # ------------------------------------------------
+            # =================================================
+            # SAVE IMAGE
+            # =================================================
 
-            file_extension = uploaded.name.split(".")[-1]
+            file_extension = (
+                uploaded.name
+                .split(".")[-1]
+                .lower()
+            )
 
             image_path = (
                 f"{user_id}/"
-                f"{__import__('uuid').uuid4()}."
+                f"{uuid.uuid4()}."
                 f"{file_extension}"
             )
 
-            image_bytes = uploaded.getvalue()
+            image_bytes = (
+                uploaded.getvalue()
+            )
 
             supabase.storage.from_(
                 "mammosense-scans"
@@ -81,50 +203,87 @@ def show_detection():
                 image_path,
                 image_bytes,
                 {
-                    "content-type": uploaded.type,
-                    "upsert": "false",
+                    "content-type":
+                        uploaded.type,
+
+                    "upsert":
+                        "false",
                 },
             )
 
-            # ------------------------------------------------
+            # =================================================
             # SAVE SCAN
-            # ------------------------------------------------
+            # =================================================
 
             response = (
                 supabase
                 .table("ai_scans")
                 .insert({
-                    "user_id": user_id,
-                    "model": "MammoSense V2",
-                    "prediction": result["prediction"],
-                    "confidence": result["confidence"],
-                    "probabilities": result["probabilities"],
-                    "image_path": image_path,
+                    "user_id":
+                        user_id,
+
+                    "model":
+                        model_name,
+
+                    "prediction":
+                        result["prediction"],
+
+                    "confidence":
+                        result["confidence"],
+
+                    "probabilities":
+                        result["probabilities"],
+
+                    "image_path":
+                        image_path,
                 })
                 .execute()
             )
 
-            scan_id = response.data[0]["id"]
+            scan_id = (
+                response.data[0]["id"]
+            )
 
-            # ------------------------------------------------
-            # SAVE SESSION
-            # ------------------------------------------------
+            # =================================================
+            # SESSION
+            # =================================================
 
-            st.session_state.scan_result = result
-            st.session_state.scan_id = scan_id
-            st.session_state.image_path = image_path
+            st.session_state.scan_result = (
+                result
+            )
 
-            if "history" not in st.session_state:
-                st.session_state.history = []
+            st.session_state.scan_id = (
+                scan_id
+            )
 
-            st.session_state.history.append(result)
+            st.session_state.image_path = (
+                image_path
+            )
 
-            st.success("Analysis completed.")
+            st.session_state.scan_model = (
+                model_name
+            )
+
+            st.session_state.history = (
+                st.session_state.get(
+                    "history",
+                    []
+                )
+            )
+
+            st.session_state.history.append(
+                result
+            )
+
+            st.success(
+                "Analysis completed."
+            )
 
         except Exception as error:
 
             st.error(
-                "MammoSense could not analyse this image."
+                "The AI model could not "
+                "analyse this image."
             )
 
             st.exception(error)
@@ -133,14 +292,18 @@ def show_detection():
     # RESULT
     # ========================================================
 
-    result = st.session_state.get("scan_result")
+    result = st.session_state.get(
+        "scan_result"
+    )
 
     if result is None:
         return
 
     st.divider()
 
-    st.subheader("AI Result")
+    st.subheader(
+        "🤖 AI Result"
+    )
 
     col1, col2 = st.columns(2)
 
@@ -162,29 +325,42 @@ def show_detection():
     # PROBABILITIES
     # ========================================================
 
-    st.subheader("Probability Breakdown")
+    st.subheader(
+        "Probability Breakdown"
+    )
 
-    for name, value in result["probabilities"].items():
+    for name, value in (
+        result["probabilities"]
+        .items()
+    ):
 
         st.write(
             f"**{name}: {value:.1%}**"
         )
 
         st.progress(
-            min(max(value, 0), 1)
+            min(
+                max(
+                    float(value),
+                    0,
+                ),
+                1,
+            )
         )
-
-    st.divider()
 
     # ========================================================
     # RADIOLOGIST REVIEW
     # ========================================================
 
-    st.subheader("👨‍⚕️ Radiologist Review")
+    st.divider()
+
+    st.subheader(
+        "👨‍⚕️ Radiologist Review"
+    )
 
     st.write(
-        "Request a professional radiologist "
-        "review of this scan."
+        "Request a professional "
+        "radiologist review of this scan."
     )
 
     if st.button(
@@ -196,52 +372,87 @@ def show_detection():
 
         try:
 
-            supabase = get_supabase()
+            supabase = (
+                get_supabase()
+            )
 
-            user = supabase.auth.get_user()
+            user = (
+                supabase.auth.get_user()
+            )
 
             if not user.user:
 
-                st.error("Please log in again.")
+                st.error(
+                    "Please log in again."
+                )
+
                 return
 
-            scan_id = st.session_state.get("scan_id")
+            scan_id = (
+                st.session_state.get(
+                    "scan_id"
+                )
+            )
 
             if not scan_id:
 
                 st.error(
-                    "No scan is available for review."
+                    "No scan is available "
+                    "for review."
                 )
 
                 return
 
             existing = (
                 supabase
-                .table("radiologist_requests")
-                .select("id,status")
-                .eq("scan_id", scan_id)
-                .eq("user_id", user.user.id)
+                .table(
+                    "radiologist_requests"
+                )
+                .select(
+                    "id,status"
+                )
+                .eq(
+                    "scan_id",
+                    scan_id,
+                )
+                .eq(
+                    "user_id",
+                    user.user.id,
+                )
                 .execute()
                 .data
             )
 
             if existing:
 
-                st.info("Review already requested.")
+                st.info(
+                    "Review already requested."
+                )
 
                 st.caption(
-                    f"Status: {existing[0]['status']}"
+                    f"Status: "
+                    f"{existing[0]['status']}"
                 )
 
             else:
 
-                supabase.table(
-                    "radiologist_requests"
-                ).insert({
-                    "user_id": user.user.id,
-                    "scan_id": scan_id,
-                    "status": "Pending",
-                }).execute()
+                (
+                    supabase
+                    .table(
+                        "radiologist_requests"
+                    )
+                    .insert({
+                        "user_id":
+                            user.user.id,
+
+                        "scan_id":
+                            scan_id,
+
+                        "status":
+                            "Pending",
+                    })
+                    .execute()
+                )
 
                 st.success(
                     "✅ Radiologist review requested."
@@ -255,21 +466,25 @@ def show_detection():
         except Exception as error:
 
             st.error(
-                "Could not request radiologist review."
+                "Could not request "
+                "radiologist review."
             )
 
             st.exception(error)
-
-    st.divider()
 
     # ========================================================
     # CONSULTATION
     # ========================================================
 
-    st.subheader("📞 Book a Consultation")
+    st.divider()
+
+    st.subheader(
+        "📞 Book a Consultation"
+    )
 
     st.write(
-        "Speak with a radiologist about your scan."
+        "Speak with a radiologist "
+        "about your scan."
     )
 
     call_type = st.selectbox(
@@ -309,16 +524,27 @@ def show_detection():
 
         try:
 
-            supabase = get_supabase()
+            supabase = (
+                get_supabase()
+            )
 
-            user = supabase.auth.get_user()
+            user = (
+                supabase.auth.get_user()
+            )
 
             if not user.user:
 
-                st.error("Please log in again.")
+                st.error(
+                    "Please log in again."
+                )
+
                 return
 
-            scan_id = st.session_state.get("scan_id")
+            scan_id = (
+                st.session_state.get(
+                    "scan_id"
+                )
+            )
 
             if not scan_id:
 
@@ -329,16 +555,32 @@ def show_detection():
 
                 return
 
-            supabase.table(
-                "consultations"
-            ).insert({
-                "user_id": user.user.id,
-                "scan_id": scan_id,
-                "call_type": call_type,
-                "preferred_date": str(preferred_date),
-                "preferred_time": preferred_time,
-                "status": "Pending",
-            }).execute()
+            (
+                supabase
+                .table("consultations")
+                .insert({
+                    "user_id":
+                        user.user.id,
+
+                    "scan_id":
+                        scan_id,
+
+                    "call_type":
+                        call_type,
+
+                    "preferred_date":
+                        str(
+                            preferred_date
+                        ),
+
+                    "preferred_time":
+                        preferred_time,
+
+                    "status":
+                        "Pending",
+                })
+                .execute()
+            )
 
             st.success(
                 "✅ Consultation request submitted."
@@ -357,10 +599,14 @@ def show_detection():
 
             st.exception(error)
 
+    # ========================================================
+    # DISCLAIMER
+    # ========================================================
+
     st.divider()
 
     st.caption(
-        "MammoSense provides AI-assisted screening "
-        "information and does not replace professional "
-        "medical evaluation."
+        "MammoSense provides AI-assisted "
+        "screening information and does not "
+        "replace professional medical evaluation."
     )
