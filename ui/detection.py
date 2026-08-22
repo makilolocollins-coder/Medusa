@@ -9,6 +9,19 @@
 #   Patient NEVER enters radiologist findings/impression/etc.
 #   PDF remains LOCKED until radiologist approval.
 # ================================================================
+# ================================================================
+# MEDUSA WORKFLOW TEST FLAG
+# ================================================================
+
+MEDUSA_WORKFLOW_TEST = True
+
+# True:
+#   Shows diagnostic information so we can confirm
+#   which workflow/version is actually running.
+#
+# False:
+#   Normal production mode.
+# ================================================================
 
 import io
 import uuid
