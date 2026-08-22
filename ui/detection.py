@@ -7,7 +7,9 @@
 # Every scan must have an APPROVED radiologist review before
 # the PDF can be downloaded.
 # ================================================================
-
+print("🔥🔥🔥 NEW DETECTION.PY LOADED 🔥🔥🔥")
+print("🔥 FILE:", __file__)
+print("🔥 VERSION: PATIENT-ID-REVIEW-V3")
 import io
 import uuid
 from datetime import datetime
