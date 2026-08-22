@@ -31,19 +31,18 @@ def show_detection():
     # ========================================================
 
     model_choice = st.selectbox(
-        "Select AI Model",
-        [
-            "MammoSense — Breast Ultrasound",
-            "MammoSense Pneumonia — Chest X-ray",
-        ],
-        key="ai_model_selector",
-    )
+    "Select AI Model",
+    [
+        "MammoSense — Breast Ultrasound",
+        "MammoSense Pneumonia — Chest X-ray",
+    ],
+    key="detection_model",
+)
 
-    is_pneumonia = (
-        model_choice.startswith(
-            "MammoSense Pneumonia"
-        )
-    )
+is_pneumonia = (
+    model_choice
+    == "MammoSense Pneumonia — Chest X-ray"
+)
 
     # ========================================================
     # MODEL INFORMATION
@@ -92,14 +91,10 @@ def show_detection():
     # ========================================================
 
     uploaded = st.file_uploader(
-        uploader_label,
-        type=[
-            "jpg",
-            "jpeg",
-            "png",
-            "webp",
-        ],
-        key=upload_key,
+    "Upload chest X-ray" if is_pneumonia
+    else "Upload ultrasound image",
+    type=["jpg", "jpeg", "png", "webp"],
+    key="medical_image_upload",
     )
 
     if uploaded is None:
@@ -133,33 +128,24 @@ def show_detection():
 
         try:
 
-            with st.spinner(
-                "Analysing image..."
-            ):
+            with st.spinner("Analysing image..."):
 
-                if is_pneumonia:
+    if is_pneumonia:
 
-                    load_pneumonia_model()
+        load_pneumonia_model()
 
-                    result = predict_pneumonia(
-                        image
-                    )
+        result = predict_pneumonia(image)
 
-                    model_name = (
-                        "MammoSense Pneumonia V2"
-                    )
+        model_name = "MammoSense Pneumonia V2"
 
-                else:
+    else:
 
-                    load_mammo_model()
+        load_model()
 
-                    result = predict_mammo(
-                        image
-                    )
+        result = predict(image)
 
-                    model_name = (
-                        "MammoSense V2"
-                    )
+        model_name = "MammoSense V2"
+
 
             supabase = get_supabase()
 
