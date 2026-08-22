@@ -1,7 +1,6 @@
 # ============================================================
 # MEDUSA AI
 # MAIN APPLICATION
-# STANDARD MEDICAL NAVIGATION
 # ============================================================
 
 import streamlit as st
@@ -9,6 +8,7 @@ import streamlit as st
 from ui.styles import load_styles
 
 from ui.home import show_home
+from ui.dashboard import show_dashboard
 from ui.detection import show_detection
 from ui.health import show_health
 from ui.marketplace import show_marketplace
@@ -32,12 +32,12 @@ st.set_page_config(
     page_title="Medusa AI",
     page_icon="🧬",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 
 # ============================================================
-# GLOBAL DESIGN
+# DESIGN
 # ============================================================
 
 load_styles()
@@ -47,41 +47,31 @@ load_styles()
 # SESSION STATE
 # ============================================================
 
-DEFAULT_STATE = {
+defaults = {
+
     "authenticated": False,
+
     "auth_step": "login",
+
     "auth_email": "",
+
     "page": "Dashboard",
 
     "history": [],
 
     "scan_result": None,
+
     "scan_id": None,
-    "scan_model": None,
-    "scan_type": None,
 
     "consultation_booked": False,
+
     "review_requested": False,
 
     "prediction": None,
-
-    "patient_id": None,
-    "patient_name": "",
-    "patient_state": "",
-
-    "scan_image_bytes": None,
-    "scan_filename": None,
-
-    "review_status": "Not requested",
-    "review_id": None,
-
-    "report_pdf": None,
-    "report_id": None,
-    "report_downloadable": False,
 }
 
 
-for key, value in DEFAULT_STATE.items():
+for key, value in defaults.items():
 
     if key not in st.session_state:
 
@@ -94,35 +84,34 @@ for key, value in DEFAULT_STATE.items():
 
 supabase = get_supabase()
 
-
-# ============================================================
-# AUTHENTICATION STATE
-# ============================================================
-
 current_user = None
-is_radiologist = False
-radiologist_name = None
 
+is_radiologist = False
+
+
+# ============================================================
+# CHECK AUTHENTICATION
+# ============================================================
 
 if st.session_state.authenticated:
 
     try:
 
-        response = supabase.auth.get_user()
+        response = (
+            supabase
+            .auth
+            .get_user()
+        )
 
         if response.user:
 
             current_user = response.user
 
-            # ------------------------------------------------
-            # CHECK WHETHER USER IS A RADIOLOGIST
-            # ------------------------------------------------
-
-            doctor_response = (
+            doctor = (
                 supabase
                 .table("radiologists")
                 .select(
-                    "user_id, full_name, active"
+                    "user_id, full_name"
                 )
                 .eq(
                     "user_id",
@@ -132,40 +121,31 @@ if st.session_state.authenticated:
                     "active",
                     True,
                 )
-                .limit(1)
                 .execute()
-            )
-
-            doctors = (
-                doctor_response.data
+                .data
                 or []
             )
 
-            if doctors:
+            is_radiologist = bool(
+                doctor
+            )
 
-                is_radiologist = True
+        else:
 
-                radiologist_name = (
-                    doctors[0].get(
-                        "full_name"
-                    )
-                )
+            st.session_state.authenticated = False
 
     except Exception:
 
         current_user = None
+
         is_radiologist = False
 
 
 # ============================================================
-# AUTHENTICATION UI
+# AUTHENTICATION SCREEN
 # ============================================================
 
 if not st.session_state.authenticated:
-
-    # --------------------------------------------------------
-    # REGISTER
-    # --------------------------------------------------------
 
     if (
         st.session_state.auth_step
@@ -185,9 +165,6 @@ if not st.session_state.authenticated:
 
             st.rerun()
 
-    # --------------------------------------------------------
-    # EMAIL VERIFICATION
-    # --------------------------------------------------------
 
     elif (
         st.session_state.auth_step
@@ -207,9 +184,6 @@ if not st.session_state.authenticated:
 
             st.rerun()
 
-    # --------------------------------------------------------
-    # LOGIN
-    # --------------------------------------------------------
 
     else:
 
@@ -226,235 +200,125 @@ if not st.session_state.authenticated:
 
             st.rerun()
 
+
     st.stop()
 
 
 # ============================================================
-# MEDUSA BRAND HEADER
+# BRAND
 # ============================================================
 
-st.markdown(
-    """
-    <div style="
-        display:flex;
-        align-items:center;
-        justify-content:space-between;
-        padding:10px 0 20px 0;
-    ">
+st.title("MEDUSA")
 
-        <div style="
-            font-size:28px;
-            font-weight:800;
-            letter-spacing:-1px;
-        ">
-            MEDUSA<span style="
-                font-size:24px;
-                margin-left:4px;
-            ">◉</span>
-        </div>
-
-        <div style="
-            font-size:13px;
-            opacity:0.65;
-        ">
-            Intelligent Health Infrastructure
-        </div>
-
-    </div>
-    """,
-    unsafe_allow_html=True,
+st.caption(
+    "Intelligent Health Infrastructure"
 )
 
 
 # ============================================================
-# SIDEBAR
+# PATIENT NAVIGATION
 # ============================================================
 
-with st.sidebar:
+patient_pages = [
 
-    st.markdown(
-        """
-        <div style="
-            font-size:24px;
-            font-weight:800;
-            margin-bottom:5px;
-        ">
-            MEDUSA<span>◉</span>
-        </div>
+    "Dashboard",
 
-        <div style="
-            font-size:12px;
-            opacity:0.65;
-            margin-bottom:25px;
-        ">
-            Medical Intelligence Platform
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    "AI Detection",
 
-    # --------------------------------------------------------
-    # USER
-    # --------------------------------------------------------
+    "Examinations",
 
-    if current_user:
+    "Reports",
 
-        display_email = (
-            current_user.email
-            or "Authenticated user"
-        )
+    "Health",
 
-        st.caption(
-            f"Signed in as\n{display_email}"
-        )
+    "Marketplace",
 
-    st.divider()
-
-    # ========================================================
-    # PATIENT NAVIGATION
-    # ========================================================
-
-    st.markdown(
-        "**MAIN**"
-    )
-
-    patient_pages = {
-        "🏠 Dashboard": "Dashboard",
-        "🔬 AI Detection": "AI Detection",
-        "📄 My Reports": "My Reports",
-        "❤️ Health": "Health",
-        "🛒 Marketplace": "Marketplace",
-        "👤 Profile": "Profile",
-    }
-
-    for label, page_name in patient_pages.items():
-
-        if st.button(
-            label,
-            key=f"nav_{page_name}",
-            use_container_width=True,
-        ):
-
-            st.session_state.page = page_name
-
-            st.rerun()
-
-    # ========================================================
-    # RADIOLOGIST NAVIGATION
-    # ========================================================
-
-    if is_radiologist:
-
-        st.divider()
-
-        st.markdown(
-            "**CLINICAL WORKSPACE**"
-        )
-
-        if st.button(
-            "🩺 Radiologist Workspace",
-            key="nav_radiologist",
-            use_container_width=True,
-        ):
-
-            st.session_state.page = (
-                "Radiologist"
-            )
-
-            st.rerun()
-
-    # ========================================================
-    # ACCOUNT
-    # ========================================================
-
-    st.divider()
-
-    st.markdown(
-        "**ACCOUNT**"
-    )
-
-    if st.button(
-        "🚪 Sign out",
-        key="sign_out",
-        use_container_width=True,
-    ):
-
-        try:
-
-            supabase.auth.sign_out()
-
-        except Exception:
-
-            pass
-
-        st.session_state.authenticated = False
-
-        st.session_state.auth_step = "login"
-
-        st.session_state.page = "Dashboard"
-
-        st.rerun()
+    "Profile",
+]
 
 
 # ============================================================
-# CURRENT PAGE
+# RADIOLOGIST NAVIGATION
 # ============================================================
 
-current_page = (
-    st.session_state.page
+if is_radiologist:
+
+    pages = [
+
+        "Dashboard",
+
+        "AI Detection",
+
+        "Examinations",
+
+        "Reports",
+
+        "Health",
+
+        "Marketplace",
+
+        "Profile",
+
+        "Radiologist",
+    ]
+
+else:
+
+    pages = patient_pages
+
+
+# ============================================================
+# NAVIGATION
+# ============================================================
+
+selected_page = st.radio(
+    "Main navigation",
+    pages,
+    index=(
+        pages.index(
+            st.session_state.page
+        )
+        if st.session_state.page in pages
+        else 0
+    ),
+    horizontal=True,
+    label_visibility="collapsed",
 )
 
 
-# ============================================================
-# DASHBOARD
-# ============================================================
-
-if current_page == "Dashboard":
-
-    show_home()
+st.session_state.page = selected_page
 
 
 # ============================================================
-# AI DETECTION
+# PAGE ROUTING
 # ============================================================
 
-elif current_page == "AI Detection":
+if selected_page == "Dashboard":
+
+    show_dashboard()
+
+
+elif selected_page == "AI Detection":
 
     show_detection()
 
 
-# ============================================================
-# HEALTH
-# ============================================================
-
-elif current_page == "Health":
+elif selected_page == "Health":
 
     show_health()
 
 
-# ============================================================
-# MARKETPLACE
-# ============================================================
-
-elif current_page == "Marketplace":
+elif selected_page == "Marketplace":
 
     show_marketplace()
 
 
-# ============================================================
-# PROFILE
-# ============================================================
-
-elif current_page == "Profile":
+elif selected_page == "Profile":
 
     show_profile()
 
 
-# ============================================================
-# RADIOLOGIST
-# ============================================================
-
-elif current_page == "Radiologist":
+elif selected_page == "Radiologist":
 
     if is_radiologist:
 
@@ -463,184 +327,28 @@ elif current_page == "Radiologist":
     else:
 
         st.error(
-            "Access denied."
-        )
-
-        st.info(
-            "Radiologist access is restricted "
-            "to verified clinical accounts."
+            "Unauthorized access."
         )
 
 
-# ============================================================
-# MY REPORTS
-# ============================================================
+elif selected_page == "Examinations":
 
-elif current_page == "My Reports":
+    st.title("Examinations")
 
-    st.title(
-        "📄 My Medical Reports"
+    st.info(
+        "Your examination history is available "
+        "on the Dashboard."
     )
 
-    st.caption(
-        "View reports that have been reviewed "
-        "and approved by a radiologist."
+
+elif selected_page == "Reports":
+
+    st.title("Medical Reports")
+
+    st.info(
+        "Final reports become available only "
+        "after radiologist review and approval."
     )
-
-    if current_user is None:
-
-        st.error(
-            "Please log in again."
-        )
-
-        st.stop()
-
-    try:
-
-        reports_response = (
-            supabase
-            .table("medical_reports")
-            .select(
-                """
-                report_id,
-                patient_id,
-                patient_name,
-                patient_state,
-                status,
-                approved_at,
-                pdf_path
-                """
-            )
-            .eq(
-                "user_id",
-                current_user.id,
-            )
-            .eq(
-                "status",
-                "APPROVED",
-            )
-            .order(
-                "approved_at",
-                desc=True,
-            )
-            .execute()
-        )
-
-        reports = (
-            reports_response.data
-            or []
-        )
-
-    except Exception as error:
-
-        st.error(
-            "Unable to load your reports."
-        )
-
-        st.exception(error)
-
-        reports = []
-
-    if not reports:
-
-        st.info(
-            "No approved medical reports yet."
-        )
-
-    else:
-
-        for report in reports:
-
-            with st.container(
-                border=True
-            ):
-
-                col1, col2 = st.columns(
-                    [3, 1]
-                )
-
-                with col1:
-
-                    st.subheader(
-                        report.get(
-                            "report_id",
-                            "Medical Report",
-                        )
-                    )
-
-                    st.write(
-                        f"**Patient:** "
-                        f"{report.get('patient_name', 'N/A')}"
-                    )
-
-                    st.write(
-                        f"**Patient ID:** "
-                        f"{report.get('patient_id', 'N/A')}"
-                    )
-
-                    st.write(
-                        f"**State:** "
-                        f"{report.get('patient_state', 'N/A')}"
-                    )
-
-                    st.caption(
-                        f"Approved: "
-                        f"{report.get('approved_at', 'N/A')}"
-                    )
-
-                with col2:
-
-                    # ------------------------------------------------
-                    # SECURE REPORT DOWNLOAD
-                    # ------------------------------------------------
-
-                    if report.get("pdf_path"):
-
-                        try:
-
-                            file_response = (
-                                supabase
-                                .storage
-                                .from_(
-                                    "medical-reports"
-                                )
-                                .download(
-                                    report[
-                                        "pdf_path"
-                                    ]
-                                )
-                            )
-
-                            st.download_button(
-                                "⬇️ Download",
-                                data=file_response,
-                                file_name=(
-                                    f"{report['report_id']}.pdf"
-                                ),
-                                mime="application/pdf",
-                                use_container_width=True,
-                                key=(
-                                    f"download_"
-                                    f"{report['report_id']}"
-                                ),
-                            )
-
-                        except Exception:
-
-                            st.warning(
-                                "Report file unavailable."
-                            )
-
-
-# ============================================================
-# UNKNOWN PAGE SAFETY
-# ============================================================
-
-else:
-
-    st.session_state.page = "Dashboard"
-
-    st.rerun()
 
 
 # ============================================================
@@ -655,6 +363,5 @@ st.caption(
 
 st.caption(
     "AI-assisted screening only. "
-    "Final clinical interpretation requires "
-    "qualified medical review."
+    "Not a substitute for professional medical advice."
 )
