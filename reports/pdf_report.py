@@ -1,14 +1,16 @@
 # ================================================================
 # MEDUSA AI
-# WORLD-CLASS MEDICAL PDF REPORT
+# PROFESSIONAL MEDICAL PDF REPORT
+#
+# PDF IS ONLY CREATED AFTER RADIOLOGIST APPROVAL.
 # ================================================================
 
-from io import BytesIO
+import io
+import uuid
 from datetime import datetime
-from uuid import uuid4
 
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER, TA_LEFT
+from reportlab.lib.enums import TA_LEFT, TA_CENTER
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import (
     getSampleStyleSheet,
@@ -21,10 +23,11 @@ from reportlab.platypus import (
     Spacer,
     Table,
     TableStyle,
-    Image,
+    Image as RLImage,
     KeepTogether,
 )
-from reportlab.lib.utils import ImageReader
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfbase import pdfmetrics
 
 
 # ================================================================
@@ -33,70 +36,27 @@ from reportlab.lib.utils import ImageReader
 
 def generate_report_id():
 
-    date_part = datetime.now().strftime(
-        "%Y%m%d"
+    timestamp = datetime.now().strftime(
+        "%Y%m%d%H%M%S"
     )
 
-    unique_part = uuid4().hex[:8].upper()
+    random_part = uuid.uuid4().hex[:6].upper()
 
     return (
-        f"MED-R-{date_part}-{unique_part}"
+        f"MED-RPT-{timestamp}-{random_part}"
     )
 
 
 # ================================================================
-# SAFE VALUE
+# SAFE TEXT
 # ================================================================
 
-def safe_text(value):
+def clean_text(value):
 
     if value is None:
-        return "Not provided"
+        return ""
 
-    value = str(value).strip()
-
-    return value if value else "Not provided"
-
-
-# ================================================================
-# IMAGE
-# ================================================================
-
-def make_medical_image(
-    image_bytes,
-    max_width=175 * mm,
-    max_height=95 * mm,
-):
-
-    if not image_bytes:
-        return None
-
-    try:
-
-        image_reader = ImageReader(
-            BytesIO(image_bytes)
-        )
-
-        width, height = (
-            image_reader.getSize()
-        )
-
-        scale = min(
-            max_width / width,
-            max_height / height,
-        )
-
-        image = Image(
-            image_reader,
-            width=width * scale,
-            height=height * scale,
-        )
-
-        return image
-
-    except Exception:
-
-        return None
+    return str(value).strip()
 
 
 # ================================================================
@@ -115,24 +75,20 @@ def generate_pdf_report(
     registration_number,
     findings,
     impression,
-    recommendations,
-    remarks,
-    reviewed_at,
+    recommendations="",
+    remarks="",
+    reviewed_at=None,
     xray_image=None,
     ultrasound_image=None,
 ):
 
     report_id = generate_report_id()
 
-    generated_at = datetime.now().strftime(
-        "%d %B %Y, %H:%M"
-    )
-
-    buffer = BytesIO()
-
     # ============================================================
-    # DOCUMENT
+    # PDF BUFFER
     # ============================================================
+
+    buffer = io.BytesIO()
 
     document = SimpleDocTemplate(
         buffer,
@@ -141,10 +97,7 @@ def generate_pdf_report(
         leftMargin=18 * mm,
         topMargin=18 * mm,
         bottomMargin=18 * mm,
-        title=(
-            f"Medusa AI Medical Report "
-            f"{report_id}"
-        ),
+        title="Medusa AI Medical Report",
         author="Medusa AI",
     )
 
@@ -157,72 +110,57 @@ def generate_pdf_report(
     title_style = ParagraphStyle(
         "ReportTitle",
         parent=styles["Title"],
-        fontName="Helvetica-Bold",
         fontSize=20,
         leading=24,
         alignment=TA_LEFT,
-        textColor=colors.HexColor(
-            "#102A43"
-        ),
         spaceAfter=4 * mm,
     )
 
     subtitle_style = ParagraphStyle(
         "Subtitle",
         parent=styles["Normal"],
-        fontName="Helvetica",
         fontSize=9,
-        leading=12,
         textColor=colors.HexColor(
-            "#52606D"
+            "#5B6573"
         ),
+        leading=13,
     )
 
     section_style = ParagraphStyle(
         "Section",
         parent=styles["Heading2"],
-        fontName="Helvetica-Bold",
         fontSize=11,
         leading=14,
         textColor=colors.HexColor(
-            "#102A43"
+            "#17324D"
         ),
         spaceBefore=5 * mm,
-        spaceAfter=2.5 * mm,
+        spaceAfter=3 * mm,
     )
 
     body_style = ParagraphStyle(
         "Body",
         parent=styles["BodyText"],
-        fontName="Helvetica",
         fontSize=9.5,
         leading=14,
-        textColor=colors.HexColor(
-            "#243B53"
-        ),
         spaceAfter=2 * mm,
     )
 
     small_style = ParagraphStyle(
         "Small",
         parent=styles["BodyText"],
-        fontName="Helvetica",
         fontSize=7.5,
         leading=10,
         textColor=colors.HexColor(
-            "#627D98"
+            "#667085"
         ),
     )
 
-    disclaimer_style = ParagraphStyle(
-        "Disclaimer",
-        parent=styles["BodyText"],
-        fontName="Helvetica",
-        fontSize=7.5,
-        leading=10,
-        textColor=colors.HexColor(
-            "#52606D"
-        ),
+    impression_style = ParagraphStyle(
+        "Impression",
+        parent=body_style,
+        fontSize=10,
+        leading=15,
     )
 
     # ============================================================
@@ -238,12 +176,13 @@ def generate_pdf_report(
     header_data = [
         [
             Paragraph(
-                "MEDUSA AI",
+                "<b>MEDUSA AI</b>",
                 title_style,
             ),
             Paragraph(
-                f"<b>FINAL MEDICAL REPORT</b><br/>"
-                f"Report ID: {safe_text(report_id)}",
+                "<b>MEDICAL IMAGING REPORT</b><br/>"
+                "AI-assisted screening with "
+                "radiologist review",
                 subtitle_style,
             ),
         ]
@@ -252,8 +191,8 @@ def generate_pdf_report(
     header = Table(
         header_data,
         colWidths=[
-            105 * mm,
-            65 * mm,
+            75 * mm,
+            90 * mm,
         ],
     )
 
@@ -275,7 +214,14 @@ def generate_pdf_report(
                 "BOTTOMPADDING",
                 (0, 0),
                 (-1, -1),
-                5,
+                8,
+            ),
+            (
+                "LINEBELOW",
+                (0, 0),
+                (-1, -1),
+                1,
+                colors.HexColor("#17324D"),
             ),
         ])
     )
@@ -283,49 +229,50 @@ def generate_pdf_report(
     story.append(header)
 
     story.append(
-        Table(
-            [[""]],
-            colWidths=[174 * mm],
-            rowHeights=[1.2 * mm],
-            style=TableStyle([
-                (
-                    "BACKGROUND",
-                    (0, 0),
-                    (-1, -1),
-                    colors.HexColor(
-                        "#167D9A"
-                    ),
-                ),
-            ]),
-        )
-    )
-
-    story.append(
         Spacer(
             1,
-            4 * mm,
+            5 * mm,
         )
     )
 
     # ============================================================
-    # PATIENT DETAILS
+    # REPORT METADATA
     # ============================================================
 
-    story.append(
-        Paragraph(
-            "PATIENT & EXAMINATION DETAILS",
-            section_style,
+    report_date = (
+        reviewed_at
+        if reviewed_at
+        else datetime.now().strftime(
+            "%d %B %Y, %H:%M"
         )
     )
 
-    patient_table_data = [
+    metadata = [
         [
             Paragraph(
-                "<b>Patient Name</b>",
+                "<b>Report ID</b>",
                 body_style,
             ),
             Paragraph(
-                safe_text(patient_name),
+                clean_text(report_id),
+                body_style,
+            ),
+            Paragraph(
+                "<b>Report Date</b>",
+                body_style,
+            ),
+            Paragraph(
+                clean_text(report_date),
+                body_style,
+            ),
+        ],
+        [
+            Paragraph(
+                "<b>Examination</b>",
+                body_style,
+            ),
+            Paragraph(
+                clean_text(examination),
                 body_style,
             ),
             Paragraph(
@@ -333,84 +280,43 @@ def generate_pdf_report(
                 body_style,
             ),
             Paragraph(
-                safe_text(patient_id),
-                body_style,
-            ),
-        ],
-        [
-            Paragraph(
-                "<b>State</b>",
-                body_style,
-            ),
-            Paragraph(
-                safe_text(state),
-                body_style,
-            ),
-            Paragraph(
-                "<b>Examination</b>",
-                body_style,
-            ),
-            Paragraph(
-                safe_text(examination),
-                body_style,
-            ),
-        ],
-        [
-            Paragraph(
-                "<b>Report Date</b>",
-                body_style,
-            ),
-            Paragraph(
-                safe_text(generated_at),
-                body_style,
-            ),
-            Paragraph(
-                "<b>Report Status</b>",
-                body_style,
-            ),
-            Paragraph(
-                "<b>RADIOLOGIST APPROVED</b>",
+                clean_text(patient_id),
                 body_style,
             ),
         ],
     ]
 
-    patient_table = Table(
-        patient_table_data,
+    metadata_table = Table(
+        metadata,
         colWidths=[
+            28 * mm,
+            57 * mm,
             30 * mm,
-            60 * mm,
-            32 * mm,
-            52 * mm,
+            50 * mm,
         ],
     )
 
-    patient_table.setStyle(
+    metadata_table.setStyle(
         TableStyle([
             (
-                "GRID",
+                "BACKGROUND",
                 (0, 0),
                 (-1, -1),
-                0.4,
-                colors.HexColor(
-                    "#D9E2EC"
-                ),
+                colors.HexColor("#F6F8FA"),
             ),
             (
-                "BACKGROUND",
+                "BOX",
                 (0, 0),
-                (0, -1),
-                colors.HexColor(
-                    "#F0F4F8"
-                ),
+                (-1, -1),
+                0.5,
+                colors.HexColor("#D0D5DD"),
             ),
             (
-                "BACKGROUND",
-                (2, 0),
-                (2, -1),
-                colors.HexColor(
-                    "#F0F4F8"
-                ),
+                "INNERGRID",
+                (0, 0),
+                (-1, -1),
+                0.3,
+                colors.HexColor("#E4E7EC"),
             ),
             (
                 "VALIGN",
@@ -422,13 +328,113 @@ def generate_pdf_report(
                 "LEFTPADDING",
                 (0, 0),
                 (-1, -1),
-                5,
+                6,
             ),
             (
                 "RIGHTPADDING",
                 (0, 0),
                 (-1, -1),
-                5,
+                6,
+            ),
+            (
+                "TOPPADDING",
+                (0, 0),
+                (-1, -1),
+                6,
+            ),
+            (
+                "BOTTOMPADDING",
+                (0, 0),
+                (-1, -1),
+                6,
+            ),
+        ])
+    )
+
+    story.append(metadata_table)
+
+    # ============================================================
+    # PATIENT
+    # ============================================================
+
+    story.append(
+        Paragraph(
+            "PATIENT INFORMATION",
+            section_style,
+        )
+    )
+
+    patient_table = Table(
+        [
+            [
+                Paragraph(
+                    "<b>Patient Name</b>",
+                    body_style,
+                ),
+                Paragraph(
+                    clean_text(patient_name),
+                    body_style,
+                ),
+            ],
+            [
+                Paragraph(
+                    "<b>State</b>",
+                    body_style,
+                ),
+                Paragraph(
+                    clean_text(state),
+                    body_style,
+                ),
+            ],
+            [
+                Paragraph(
+                    "<b>Patient ID</b>",
+                    body_style,
+                ),
+                Paragraph(
+                    clean_text(patient_id),
+                    body_style,
+                ),
+            ],
+        ],
+        colWidths=[
+            45 * mm,
+            120 * mm,
+        ],
+    )
+
+    patient_table.setStyle(
+        TableStyle([
+            (
+                "GRID",
+                (0, 0),
+                (-1, -1),
+                0.4,
+                colors.HexColor("#D0D5DD"),
+            ),
+            (
+                "BACKGROUND",
+                (0, 0),
+                (0, -1),
+                colors.HexColor("#F9FAFB"),
+            ),
+            (
+                "VALIGN",
+                (0, 0),
+                (-1, -1),
+                "TOP",
+            ),
+            (
+                "LEFTPADDING",
+                (0, 0),
+                (-1, -1),
+                6,
+            ),
+            (
+                "RIGHTPADDING",
+                (0, 0),
+                (-1, -1),
+                6,
             ),
             (
                 "TOPPADDING",
@@ -445,63 +451,133 @@ def generate_pdf_report(
         ])
     )
 
-    story.append(
-        patient_table
-    )
+    story.append(patient_table)
 
     # ============================================================
-    # AI SCREENING
+    # IMAGE
+    # ============================================================
+
+    selected_image = (
+        xray_image
+        if xray_image is not None
+        else ultrasound_image
+    )
+
+    if selected_image:
+
+        try:
+
+            image_buffer = io.BytesIO(
+                selected_image
+            )
+
+            medical_image = RLImage(
+                image_buffer,
+                width=105 * mm,
+                height=75 * mm,
+                kind="proportional",
+            )
+
+            story.append(
+                Paragraph(
+                    "EXAMINATION IMAGE",
+                    section_style,
+                )
+            )
+
+            image_table = Table(
+                [[medical_image]],
+                colWidths=[
+                    165 * mm
+                ],
+            )
+
+            image_table.setStyle(
+                TableStyle([
+                    (
+                        "ALIGN",
+                        (0, 0),
+                        (-1, -1),
+                        "CENTER",
+                    ),
+                    (
+                        "BOX",
+                        (0, 0),
+                        (-1, -1),
+                        0.5,
+                        colors.HexColor("#D0D5DD"),
+                    ),
+                    (
+                        "TOPPADDING",
+                        (0, 0),
+                        (-1, -1),
+                        8,
+                    ),
+                    (
+                        "BOTTOMPADDING",
+                        (0, 0),
+                        (-1, -1),
+                        8,
+                    ),
+                ])
+            )
+
+            story.append(image_table)
+
+        except Exception:
+            pass
+
+    # ============================================================
+    # AI RESULT
     # ============================================================
 
     story.append(
         Paragraph(
-            "AI-ASSISTED SCREENING",
+            "AI SCREENING RESULT",
             section_style,
         )
     )
 
-    ai_confidence = (
+    ai_confidence_percent = (
         float(ai_confidence) * 100
     )
 
-    ai_data = [
-        [
-            Paragraph(
-                "<b>AI System</b>",
-                body_style,
-            ),
-            Paragraph(
-                "Medusa AI",
-                body_style,
-            ),
-        ],
-        [
-            Paragraph(
-                "<b>AI Finding</b>",
-                body_style,
-            ),
-            Paragraph(
-                safe_text(ai_prediction),
-                body_style,
-            ),
-        ],
-        [
-            Paragraph(
-                "<b>AI Confidence</b>",
-                body_style,
-            ),
-            Paragraph(
-                f"{ai_confidence:.2f}%",
-                body_style,
-            ),
-        ],
-    ]
-
     ai_table = Table(
-        ai_data,
+        [
+            [
+                Paragraph(
+                    "<b>AI Model</b>",
+                    body_style,
+                ),
+                Paragraph(
+                    "Medusa AI",
+                    body_style,
+                ),
+            ],
+            [
+                Paragraph(
+                    "<b>AI Finding</b>",
+                    body_style,
+                ),
+                Paragraph(
+                    clean_text(ai_prediction),
+                    body_style,
+                ),
+            ],
+            [
+                Paragraph(
+                    "<b>AI Confidence</b>",
+                    body_style,
+                ),
+                Paragraph(
+                    f"{ai_confidence_percent:.1f}%",
+                    body_style,
+                ),
+            ],
+        ],
         colWidths=[
             45 * mm,
-            129 * mm,
+            120 * mm,
         ],
     )
 
@@ -512,23 +588,19 @@ def generate_pdf_report(
                 (0, 0),
                 (-1, -1),
                 0.4,
-                colors.HexColor(
-                    "#D9E2EC"
-                ),
+                colors.HexColor("#D0D5DD"),
             ),
             (
                 "BACKGROUND",
                 (0, 0),
                 (0, -1),
-                colors.HexColor(
-                    "#F0F4F8"
-                ),
+                colors.HexColor("#F9FAFB"),
             ),
             (
                 "VALIGN",
                 (0, 0),
                 (-1, -1),
-                "MIDDLE",
+                "TOP",
             ),
             (
                 "LEFTPADDING",
@@ -563,19 +635,12 @@ def generate_pdf_report(
     # PROBABILITIES
     # ============================================================
 
-    if probabilities:
-
-        story.append(
-            Paragraph(
-                "AI PROBABILITY BREAKDOWN",
-                section_style,
-            )
-        )
+    if isinstance(probabilities, dict):
 
         probability_rows = [
             [
                 Paragraph(
-                    "<b>Classification</b>",
+                    "<b>Class</b>",
                     body_style,
                 ),
                 Paragraph(
@@ -590,7 +655,7 @@ def generate_pdf_report(
             probability_rows.append(
                 [
                     Paragraph(
-                        safe_text(name),
+                        clean_text(name),
                         body_style,
                     ),
                     Paragraph(
@@ -603,8 +668,8 @@ def generate_pdf_report(
         probability_table = Table(
             probability_rows,
             colWidths=[
-                120 * mm,
-                54 * mm,
+                100 * mm,
+                65 * mm,
             ],
         )
 
@@ -615,29 +680,19 @@ def generate_pdf_report(
                     (0, 0),
                     (-1, -1),
                     0.4,
-                    colors.HexColor(
-                        "#D9E2EC"
-                    ),
+                    colors.HexColor("#D0D5DD"),
                 ),
                 (
                     "BACKGROUND",
                     (0, 0),
                     (-1, 0),
-                    colors.HexColor(
-                        "#EAF2F8"
-                    ),
+                    colors.HexColor("#EEF2F6"),
                 ),
                 (
                     "ALIGN",
                     (1, 1),
                     (1, -1),
                     "RIGHT",
-                ),
-                (
-                    "VALIGN",
-                    (0, 0),
-                    (-1, -1),
-                    "MIDDLE",
                 ),
                 (
                     "LEFTPADDING",
@@ -655,59 +710,21 @@ def generate_pdf_report(
                     "TOPPADDING",
                     (0, 0),
                     (-1, -1),
-                    4,
+                    5,
                 ),
                 (
                     "BOTTOMPADDING",
                     (0, 0),
                     (-1, -1),
-                    4,
+                    5,
                 ),
             ])
         )
 
-        story.append(
-            probability_table
-        )
+        story.append(probability_table)
 
     # ============================================================
-    # MEDICAL IMAGE
-    # ============================================================
-
-    medical_image = (
-        xray_image
-        if xray_image
-        else ultrasound_image
-    )
-
-    if medical_image:
-
-        story.append(
-            Paragraph(
-                "EXAMINATION IMAGE",
-                section_style,
-            )
-        )
-
-        image = make_medical_image(
-            medical_image
-        )
-
-        if image:
-
-            story.append(
-                image
-            )
-
-            story.append(
-                Spacer(
-                    1,
-                    3 * mm,
-                )
-            )
-
-    # ============================================================
-    # RADIOLOGIST REPORT
+    # RADIOLOGIST REVIEW
     # ============================================================
 
     story.append(
@@ -726,7 +743,10 @@ def generate_pdf_report(
 
     story.append(
         Paragraph(
-            safe_text(findings),
+            clean_text(findings).replace(
+                "\n",
+                "<br/>",
+            ),
             body_style,
         )
     )
@@ -740,38 +760,55 @@ def generate_pdf_report(
 
     story.append(
         Paragraph(
-            safe_text(impression),
-            body_style,
+            clean_text(impression).replace(
+                "\n",
+                "<br/>",
+            ),
+            impression_style,
         )
     )
 
-    story.append(
-        Paragraph(
-            "<b>Recommendations</b>",
-            body_style,
-        )
-    )
+    if clean_text(recommendations):
 
-    story.append(
-        Paragraph(
-            safe_text(recommendations),
-            body_style,
+        story.append(
+            Paragraph(
+                "<b>Recommendations</b>",
+                body_style,
+            )
         )
-    )
 
-    story.append(
-        Paragraph(
-            "<b>Radiologist Remarks</b>",
-            body_style,
+        story.append(
+            Paragraph(
+                clean_text(
+                    recommendations
+                ).replace(
+                    "\n",
+                    "<br/>",
+                ),
+                body_style,
+            )
         )
-    )
 
-    story.append(
-        Paragraph(
-            safe_text(remarks),
-            body_style,
+    if clean_text(remarks):
+
+        story.append(
+            Paragraph(
+                "<b>Radiologist Remarks</b>",
+                body_style,
+            )
         )
-    )
+
+        story.append(
+            Paragraph(
+                clean_text(
+                    remarks
+                ).replace(
+                    "\n",
+                    "<br/>",
+                ),
+                body_style,
+            )
+        )
 
     # ============================================================
     # RADIOLOGIST AUTHENTICATION
@@ -784,83 +821,81 @@ def generate_pdf_report(
         )
     )
 
-    authentication_data = [
+    radiologist_table = Table(
         [
-            Paragraph(
-                "<b>Radiologist</b>",
-                body_style,
-            ),
-            Paragraph(
-                safe_text(radiologist_name),
-                body_style,
-            ),
-        ],
-        [
-            Paragraph(
-                "<b>Registration No.</b>",
-                body_style,
-            ),
-            Paragraph(
-                safe_text(
-                    registration_number
+            [
+                Paragraph(
+                    "<b>Radiologist</b>",
+                    body_style,
                 ),
-                body_style,
-            ),
+                Paragraph(
+                    clean_text(
+                        radiologist_name
+                    ),
+                    body_style,
+                ),
+            ],
+            [
+                Paragraph(
+                    "<b>Registration No.</b>",
+                    body_style,
+                ),
+                Paragraph(
+                    clean_text(
+                        registration_number
+                    ),
+                    body_style,
+                ),
+            ],
+            [
+                Paragraph(
+                    "<b>Review Status</b>",
+                    body_style,
+                ),
+                Paragraph(
+                    "RADIOLOGIST APPROVED",
+                    body_style,
+                ),
+            ],
+            [
+                Paragraph(
+                    "<b>Reviewed</b>",
+                    body_style,
+                ),
+                Paragraph(
+                    clean_text(
+                        report_date
+                    ),
+                    body_style,
+                ),
+            ],
         ],
-        [
-            Paragraph(
-                "<b>Reviewed</b>",
-                body_style,
-            ),
-            Paragraph(
-                safe_text(reviewed_at),
-                body_style,
-            ),
-        ],
-        [
-            Paragraph(
-                "<b>Status</b>",
-                body_style,
-            ),
-            Paragraph(
-                "<b>APPROVED</b>",
-                body_style,
-            ),
-        ],
-    ]
-
-    authentication_table = Table(
-        authentication_data,
         colWidths=[
             45 * mm,
-            129 * mm,
+            120 * mm,
         ],
     )
 
-    authentication_table.setStyle(
+    radiologist_table.setStyle(
         TableStyle([
             (
                 "GRID",
                 (0, 0),
                 (-1, -1),
                 0.4,
-                colors.HexColor(
-                    "#D9E2EC"
-                ),
+                colors.HexColor("#D0D5DD"),
             ),
             (
                 "BACKGROUND",
                 (0, 0),
                 (0, -1),
-                colors.HexColor(
-                    "#F0F4F8"
-                ),
+                colors.HexColor("#F9FAFB"),
             ),
             (
                 "VALIGN",
                 (0, 0),
                 (-1, -1),
-                "MIDDLE",
+                "TOP",
             ),
             (
                 "LEFTPADDING",
@@ -878,20 +913,18 @@ def generate_pdf_report(
                 "TOPPADDING",
                 (0, 0),
                 (-1, -1),
-                5,
+                6,
             ),
             (
                 "BOTTOMPADDING",
                 (0, 0),
                 (-1, -1),
-                5,
+                6,
             ),
         ])
     )
 
-    story.append(
-        authentication_table
-    )
+    story.append(radiologist_table)
 
     # ============================================================
     # DISCLAIMER
@@ -900,102 +933,33 @@ def generate_pdf_report(
     story.append(
         Spacer(
             1,
-            7 * mm,
+            8 * mm,
         )
     )
 
-    disclaimer_box = Table(
-        [
-            [
-                Paragraph(
-                    "<b>IMPORTANT MEDICAL NOTICE</b><br/><br/>"
-                    "This report contains AI-assisted screening "
-                    "information together with the interpretation "
-                    "and approval of a qualified reviewing "
-                    "radiologist. AI output is not, by itself, "
-                    "a medical diagnosis. Clinical findings should "
-                    "be interpreted in conjunction with the "
-                    "patient's clinical history and other relevant "
-                    "investigations.",
-                    disclaimer_style,
-                )
-            ]
-        ],
-        colWidths=[
-            174 * mm
-        ],
-    )
-
-    disclaimer_box.setStyle(
-        TableStyle([
-            (
-                "BACKGROUND",
-                (0, 0),
-                (-1, -1),
-                colors.HexColor(
-                    "#F7F9FC"
-                ),
-            ),
-            (
-                "BOX",
-                (0, 0),
-                (-1, -1),
-                0.5,
-                colors.HexColor(
-                    "#BCCCDC"
-                ),
-            ),
-            (
-                "LEFTPADDING",
-                (0, 0),
-                (-1, -1),
-                8,
-            ),
-            (
-                "RIGHTPADDING",
-                (0, 0),
-                (-1, -1),
-                8,
-            ),
-            (
-                "TOPPADDING",
-                (0, 0),
-                (-1, -1),
-                7,
-            ),
-            (
-                "BOTTOMPADDING",
-                (0, 0),
-                (-1, -1),
-                7,
-            ),
-        ])
+    disclaimer = (
+        "<b>Important:</b> This report contains "
+        "AI-assisted screening information and "
+        "the final clinical interpretation of a "
+        "qualified radiologist. AI output should "
+        "not be interpreted independently as a "
+        "medical diagnosis."
     )
 
     story.append(
-        disclaimer_box
+        Paragraph(
+            disclaimer,
+            small_style,
+        )
     )
 
     # ============================================================
     # FOOTER
     # ============================================================
 
-    def add_footer(canvas, document):
+    def footer(canvas, doc):
 
         canvas.saveState()
-
-        canvas.setStrokeColor(
-            colors.HexColor(
-                "#D9E2EC"
-            )
-        )
-
-        canvas.line(
-            18 * mm,
-            13 * mm,
-            192 * mm,
-            13 * mm,
-        )
 
         canvas.setFont(
             "Helvetica",
@@ -1003,21 +967,19 @@ def generate_pdf_report(
         )
 
         canvas.setFillColor(
-            colors.HexColor(
-                "#627D98"
-            )
+            colors.HexColor("#667085")
         )
 
         canvas.drawString(
             18 * mm,
-            8 * mm,
+            10 * mm,
             f"Medusa AI • Report {report_id}",
         )
 
         canvas.drawRightString(
-            192 * mm,
-            8 * mm,
-            f"Page {document.page}",
+            A4[0] - 18 * mm,
+            10 * mm,
+            f"Page {doc.page}",
         )
 
         canvas.restoreState()
@@ -1028,8 +990,8 @@ def generate_pdf_report(
 
     document.build(
         story,
-        onFirstPage=add_footer,
-        onLaterPages=add_footer,
+        onFirstPage=footer,
+        onLaterPages=footer,
     )
 
     buffer.seek(0)
