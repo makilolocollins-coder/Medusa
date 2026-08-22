@@ -1,11 +1,13 @@
 # ================================================================
 # MAMMOSENSE PNEUMONIA V2
 # 3D RESNET-18 PSEUDO-3D CHEST X-RAY CLASSIFIER
+#
+# MUST MATCH THE TRAINING ARCHITECTURE EXACTLY
 # ================================================================
 
-import os
 import torch
 import torch.nn as nn
+
 from PIL import Image
 from torchvision import transforms
 from huggingface_hub import hf_hub_download
@@ -31,9 +33,12 @@ DEVICE = torch.device(
     "cuda" if torch.cuda.is_available() else "cpu"
 )
 
+_model = None
+
 
 # ================================================================
-# 3D RESNET BASIC BLOCK
+# BASIC BLOCK
+# EXACTLY MATCHES TRAINING CODE
 # ================================================================
 
 class BasicBlock3D(nn.Module):
@@ -45,7 +50,6 @@ class BasicBlock3D(nn.Module):
         in_channels,
         out_channels,
         stride=1,
-        downsample=None,
     ):
 
         super().__init__()
@@ -63,10 +67,6 @@ class BasicBlock3D(nn.Module):
             out_channels
         )
 
-        self.relu = nn.ReLU(
-            inplace=True
-        )
-
         self.conv2 = nn.Conv3d(
             out_channels,
             out_channels,
@@ -80,7 +80,33 @@ class BasicBlock3D(nn.Module):
             out_channels
         )
 
-        self.downsample = downsample
+        self.relu = nn.ReLU(
+            inplace=True
+        )
+
+        if (
+            stride != 1
+            or in_channels != out_channels
+        ):
+
+            self.downsample = nn.Sequential(
+
+                nn.Conv3d(
+                    in_channels,
+                    out_channels,
+                    kernel_size=1,
+                    stride=stride,
+                    bias=False,
+                ),
+
+                nn.BatchNorm3d(
+                    out_channels
+                ),
+            )
+
+        else:
+
+            self.downsample = None
 
     def forward(self, x):
 
@@ -94,16 +120,20 @@ class BasicBlock3D(nn.Module):
         out = self.bn2(out)
 
         if self.downsample is not None:
+
             identity = self.downsample(x)
 
-        out += identity
+        out = out + identity
+
         out = self.relu(out)
 
         return out
 
 
 # ================================================================
-# 3D RESNET-18
+# RESNET-18
+#
+# THIS MUST MATCH TRAINING EXACTLY
 # ================================================================
 
 class ResNet3D18(nn.Module):
@@ -111,32 +141,38 @@ class ResNet3D18(nn.Module):
     def __init__(
         self,
         num_classes=2,
-        input_channels=1,
     ):
 
         super().__init__()
 
         self.in_channels = 64
 
-        self.conv1 = nn.Conv3d(
-            input_channels,
-            64,
-            kernel_size=7,
-            stride=(1, 2, 2),
-            padding=(3, 3, 3),
-            bias=False,
-        )
+        # IMPORTANT:
+        # Training used "stem", not conv1/bn1/maxpool
+        self.stem = nn.Sequential(
 
-        self.bn1 = nn.BatchNorm3d(64)
+            nn.Conv3d(
+                1,
+                64,
+                kernel_size=7,
+                stride=(1, 2, 2),
+                padding=3,
+                bias=False,
+            ),
 
-        self.relu = nn.ReLU(
-            inplace=True
-        )
+            nn.BatchNorm3d(
+                64
+            ),
 
-        self.maxpool = nn.MaxPool3d(
-            kernel_size=(3, 3, 3),
-            stride=(2, 2, 2),
-            padding=1,
+            nn.ReLU(
+                inplace=True
+            ),
+
+            nn.MaxPool3d(
+                kernel_size=3,
+                stride=2,
+                padding=1,
+            ),
         )
 
         self.layer1 = self._make_layer(
@@ -174,68 +210,48 @@ class ResNet3D18(nn.Module):
 
     def _make_layer(
         self,
-        channels,
+        out_channels,
         blocks,
         stride,
     ):
 
-        downsample = None
+        layers = [
 
-        if (
-            stride != 1
-            or self.in_channels != channels
-        ):
-
-            downsample = nn.Sequential(
-
-                nn.Conv3d(
-                    self.in_channels,
-                    channels,
-                    kernel_size=1,
-                    stride=stride,
-                    bias=False,
-                ),
-
-                nn.BatchNorm3d(
-                    channels
-                ),
-            )
-
-        layers = []
-
-        layers.append(
             BasicBlock3D(
                 self.in_channels,
-                channels,
+                out_channels,
                 stride,
-                downsample,
             )
-        )
 
-        self.in_channels = channels
+        ]
+
+        self.in_channels = out_channels
 
         for _ in range(1, blocks):
 
             layers.append(
+
                 BasicBlock3D(
-                    self.in_channels,
-                    channels,
+                    out_channels,
+                    out_channels,
                 )
+
             )
 
-        return nn.Sequential(*layers)
+        return nn.Sequential(
+            *layers
+        )
 
     def forward(self, x):
 
-        x = self.conv1(x)
-        x = self.bn1(x)
-        x = self.relu(x)
-
-        x = self.maxpool(x)
+        x = self.stem(x)
 
         x = self.layer1(x)
+
         x = self.layer2(x)
+
         x = self.layer3(x)
+
         x = self.layer4(x)
 
         x = self.avgpool(x)
@@ -251,27 +267,41 @@ class ResNet3D18(nn.Module):
 
 
 # ================================================================
-# MODEL LOADING
+# PREPROCESSING
+#
+# MUST MATCH VALIDATION/TEST PREPROCESSING
 # ================================================================
 
-_model = None
+transform = transforms.Compose([
 
+    transforms.Resize(
+        (IMAGE_SIZE, IMAGE_SIZE)
+    ),
+
+    transforms.ToTensor(),
+
+    transforms.Normalize(
+        mean=[0.485],
+        std=[0.229],
+    ),
+])
+
+
+# ================================================================
+# LOAD MODEL
+# ================================================================
 
 def load_model():
 
     global _model
 
     if _model is not None:
+
         return _model
 
     model_path = hf_hub_download(
         repo_id=REPO_ID,
         filename=MODEL_FILENAME,
-    )
-
-    model = ResNet3D18(
-        num_classes=2,
-        input_channels=1,
     )
 
     checkpoint = torch.load(
@@ -280,9 +310,17 @@ def load_model():
         weights_only=False,
     )
 
-    # ------------------------------------------------------------
+    # ============================================================
+    # CREATE EXACT TRAINING ARCHITECTURE
+    # ============================================================
+
+    model = ResNet3D18(
+        num_classes=2
+    )
+
+    # ============================================================
     # EXTRACT STATE DICT
-    # ------------------------------------------------------------
+    # ============================================================
 
     if isinstance(checkpoint, dict):
 
@@ -306,9 +344,9 @@ def load_model():
 
         state_dict = checkpoint
 
-    # ------------------------------------------------------------
-    # CLEAN COMMON PREFIXES
-    # ------------------------------------------------------------
+    # ============================================================
+    # REMOVE COMMON PREFIXES
+    # ============================================================
 
     cleaned_state_dict = {}
 
@@ -336,45 +374,24 @@ def load_model():
             new_key
         ] = value
 
-    # ------------------------------------------------------------
-    # LOAD WEIGHTS
-    # ------------------------------------------------------------
+    # ============================================================
+    # STRICT LOAD
+    # ============================================================
 
     model.load_state_dict(
         cleaned_state_dict,
         strict=True,
     )
 
-    model.to(DEVICE)
+    model = model.to(
+        DEVICE
+    )
 
     model.eval()
 
     _model = model
 
     return _model
-
-
-# ================================================================
-# PREPROCESSING
-# ================================================================
-
-transform = transforms.Compose([
-
-    transforms.Grayscale(
-        num_output_channels=1
-    ),
-
-    transforms.Resize(
-        (IMAGE_SIZE, IMAGE_SIZE)
-    ),
-
-    transforms.ToTensor(),
-
-    transforms.Normalize(
-        mean=[0.485],
-        std=[0.229],
-    ),
-])
 
 
 # ================================================================
@@ -386,47 +403,56 @@ def predict(image):
 
     model = load_model()
 
+    # ------------------------------------------------------------
+    # ACCEPT PIL IMAGE OR FILE PATH
+    # ------------------------------------------------------------
+
     if not isinstance(
         image,
         Image.Image,
     ):
 
-        image = Image.open(image)
+        image = Image.open(
+            image
+        )
+
+    # ------------------------------------------------------------
+    # CONVERT TO GRAYSCALE
+    # ------------------------------------------------------------
 
     image = image.convert(
         "L"
     )
 
+    # ------------------------------------------------------------
+    # PREPROCESS
+    # ------------------------------------------------------------
+
     tensor = transform(
         image
     )
 
-    # ------------------------------------------------------------
-    # 2D IMAGE → PSEUDO 3D VOLUME
+    # Current:
     #
-    # Current shape:
-    # 1 × 224 × 224
+    # [1, 224, 224]
     #
-    # Required:
-    # 1 × 16 × 224 × 224
-    # ------------------------------------------------------------
-
-    tensor = tensor.unsqueeze(
-        1
-    )
+    # Repeat across depth:
+    #
+    # [16, 224, 224]
+    #
+    # Add channel:
+    #
+    # [1, 16, 224, 224]
+    #
+    # Add batch:
+    #
+    # [1, 1, 16, 224, 224]
 
     tensor = tensor.repeat(
-        1,
         DEPTH,
         1,
         1,
     )
-
-    # Add batch dimension
-    #
-    # 1 × 16 × 224 × 224
-    # →
-    # 1 × 1 × 16 × 224 × 224
 
     tensor = tensor.unsqueeze(
         0
@@ -464,6 +490,7 @@ def predict(image):
 
         "PNEUMONIA":
             pneumonia_probability,
+
     }
 
     predicted_index = int(
@@ -492,4 +519,5 @@ def predict(image):
 
         "probabilities":
             probabilities_dict,
+
     }
