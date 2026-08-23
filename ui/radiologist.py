@@ -280,6 +280,42 @@ def show_radiologist():
 
         return
 scan = scans[0]
+image_path = scan.get("image_path")
+
+if image_path:
+
+    try:
+
+        image_bytes = (
+            supabase
+            .storage
+            .from_("mammosense-scans")
+            .download(image_path)
+        )
+
+        image = Image.open(
+            io.BytesIO(image_bytes)
+        ).convert("RGB")
+
+        st.subheader("Examination Image")
+
+        st.image(
+            image,
+            caption=scan.get(
+                "examination",
+                "Medical Scan",
+            ),
+            use_container_width=True,
+        )
+
+    except Exception as error:
+
+        st.error("Unable to display examination image.")
+        st.exception(error)
+
+else:
+
+    st.error("No image path is stored for this examination.")
 
 # ============================================================
 # MEDICAL IMAGE
@@ -629,7 +665,22 @@ else:
             # ====================================================
             # GENERATE FINAL PDF
             # ====================================================
+                scan_image_bytes = None
 
+image_path = scan.get("image_path")
+
+if image_path:
+
+    try:
+        scan_image_bytes = (
+            supabase
+            .storage
+            .from_("mammosense-scans")
+            .download(image_path)
+        )
+    except Exception:
+        scan_image_bytes = None
+        
             report_buffer, report_id = (
                 generate_pdf_report(
                     patient_name=(
@@ -705,9 +756,17 @@ else:
                         )
                     ),
 
-                    xray_image=None,
+                    xray_image=(
+    scan_image_bytes
+    if scan.get("examination") == "Chest X-ray"
+    else None
+),
 
-                    ultrasound_image=None,
+ultrasound_image=(
+    scan_image_bytes
+    if scan.get("examination") == "Breast Ultrasound"
+    else None
+),
                 )
             )
 
