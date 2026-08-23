@@ -15,6 +15,8 @@ from ui.marketplace import show_marketplace
 from ui.profile import show_profile
 from ui.radiologist import show_radiologist
 
+# IMPORTANT:
+# This is the REPORT PAGE, not the PDF generator.
 from reports.pdf_reports_page import show_pdf_reports
 
 from ui.auth import (
@@ -72,7 +74,16 @@ for key, value in defaults.items():
 # SUPABASE
 # ============================================================
 
-supabase = get_supabase()
+try:
+
+    supabase = get_supabase()
+
+except Exception as error:
+
+    st.error("Unable to connect to the database.")
+    st.exception(error)
+    st.stop()
+
 
 current_user = None
 is_radiologist = False
@@ -88,14 +99,18 @@ if st.session_state.authenticated:
 
         response = supabase.auth.get_user()
 
-        if response.user:
+        if response and response.user:
 
             current_user = response.user
 
-            doctor = (
+            # ------------------------------------------------
+            # VERIFY RADIOLOGIST
+            # ------------------------------------------------
+
+            doctor_response = (
                 supabase
                 .table("radiologists")
-                .select("user_id, full_name")
+                .select("user_id,full_name")
                 .eq(
                     "user_id",
                     current_user.id,
@@ -104,12 +119,17 @@ if st.session_state.authenticated:
                     "active",
                     True,
                 )
+                .limit(1)
                 .execute()
-                .data
-                or []
             )
 
-            is_radiologist = bool(doctor)
+            doctors = (
+                doctor_response.data
+                if doctor_response
+                else []
+            )
+
+            is_radiologist = bool(doctors)
 
         else:
 
@@ -127,6 +147,10 @@ if st.session_state.authenticated:
 
 if not st.session_state.authenticated:
 
+    # --------------------------------------------------------
+    # REGISTER
+    # --------------------------------------------------------
+
     if st.session_state.auth_step == "register":
 
         show_auth()
@@ -139,7 +163,12 @@ if not st.session_state.authenticated:
         ):
 
             st.session_state.auth_step = "login"
+
             st.rerun()
+
+    # --------------------------------------------------------
+    # VERIFICATION
+    # --------------------------------------------------------
 
     elif st.session_state.auth_step == "verify":
 
@@ -153,7 +182,12 @@ if not st.session_state.authenticated:
         ):
 
             st.session_state.auth_step = "login"
+
             st.rerun()
+
+    # --------------------------------------------------------
+    # LOGIN
+    # --------------------------------------------------------
 
     else:
 
@@ -167,6 +201,7 @@ if not st.session_state.authenticated:
         ):
 
             st.session_state.auth_step = "register"
+
             st.rerun()
 
     st.stop()
@@ -224,14 +259,19 @@ else:
 # NAVIGATION
 # ============================================================
 
+current_page = st.session_state.get(
+    "page",
+    "Dashboard",
+)
+
+if current_page not in pages:
+
+    current_page = "Dashboard"
+
 selected_page = st.radio(
     "Main navigation",
     pages,
-    index=(
-        pages.index(st.session_state.page)
-        if st.session_state.page in pages
-        else 0
-    ),
+    index=pages.index(current_page),
     horizontal=True,
     label_visibility="collapsed",
 )
@@ -264,6 +304,17 @@ elif selected_page == "Examinations":
 
 
 elif selected_page == "Reports":
+
+    # ========================================================
+    # IMPORTANT
+    # This is the actual Medical Reports page.
+    #
+    # It loads:
+    # reports/pdf_reports_page.py
+    #
+    # which contains:
+    # show_pdf_reports()
+    # ========================================================
 
     show_pdf_reports()
 
