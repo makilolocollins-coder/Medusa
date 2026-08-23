@@ -1,6 +1,8 @@
+import io
 from datetime import datetime
 
 import streamlit as st
+from PIL import Image
 
 from utils.supabase_client import get_supabase
 from reports.pdf_report import generate_pdf_report
@@ -277,12 +279,60 @@ def show_radiologist():
         )
 
         return
+scan = scans[0]
 
-    scan = scans[0]
+# ============================================================
+# MEDICAL IMAGE
+# ============================================================
 
-    # ============================================================
-    # PATIENT / EXAMINATION
-    # ============================================================
+st.divider()
+
+st.subheader("Medical Image")
+
+image_path = scan.get("image_path")
+
+if not image_path:
+
+    st.error(
+        "No medical image is associated with this examination."
+    )
+
+else:
+
+    try:
+
+        image_bytes = (
+            supabase
+            .storage
+            .from_("mammosense-scans")
+            .download(image_path)
+        )
+
+        scan_image = Image.open(
+            io.BytesIO(image_bytes)
+        ).convert("RGB")
+
+        st.image(
+            scan_image,
+            caption=scan.get(
+                "examination",
+                "Medical Examination",
+            ),
+            use_container_width=True,
+        )
+
+    except Exception as error:
+
+        st.error(
+            "The medical image could not be loaded."
+        )
+
+        st.exception(error)
+
+
+# ============================================================
+# PATIENT / EXAMINATION
+# ============================================================
 
     st.divider()
 
