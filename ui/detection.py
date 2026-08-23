@@ -304,12 +304,12 @@ else:
     load_pneumonia_model()
     result = predict_pneumonia(image)
 
-elif tuberculosis:
+    elif tuberculosis:
 
     load_tb_model()
     result = predict_tb(image)
 
-else:
+    else:
 
     load_mammo_model()
     result = predict_mammo(image)
