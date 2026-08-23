@@ -284,7 +284,6 @@ elif selected_page == "Reports":
     # Reports are loaded from reports/pdf_report.py
     # There is NO pdf_reports_page.py import.
 
-    show_pdf_reports()
 
 
 elif selected_page == "Health":
