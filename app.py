@@ -14,7 +14,8 @@ from ui.health import show_health
 from ui.marketplace import show_marketplace
 from ui.profile import show_profile
 from ui.radiologist import show_radiologist
-from reports.pdf_reports import show_pdf_reports
+
+from reports.pdf_reports_page import show_pdf_reports
 
 from ui.auth import (
     show_auth,
@@ -49,33 +50,21 @@ load_styles()
 # ============================================================
 
 defaults = {
-
     "authenticated": False,
-
     "auth_step": "login",
-
     "auth_email": "",
-
     "page": "Dashboard",
-
     "history": [],
-
     "scan_result": None,
-
     "scan_id": None,
-
     "consultation_booked": False,
-
     "review_requested": False,
-
     "prediction": None,
 }
-
 
 for key, value in defaults.items():
 
     if key not in st.session_state:
-
         st.session_state[key] = value
 
 
@@ -86,7 +75,6 @@ for key, value in defaults.items():
 supabase = get_supabase()
 
 current_user = None
-
 is_radiologist = False
 
 
@@ -98,11 +86,7 @@ if st.session_state.authenticated:
 
     try:
 
-        response = (
-            supabase
-            .auth
-            .get_user()
-        )
+        response = supabase.auth.get_user()
 
         if response.user:
 
@@ -111,9 +95,7 @@ if st.session_state.authenticated:
             doctor = (
                 supabase
                 .table("radiologists")
-                .select(
-                    "user_id, full_name"
-                )
+                .select("user_id, full_name")
                 .eq(
                     "user_id",
                     current_user.id,
@@ -127,9 +109,7 @@ if st.session_state.authenticated:
                 or []
             )
 
-            is_radiologist = bool(
-                doctor
-            )
+            is_radiologist = bool(doctor)
 
         else:
 
@@ -138,7 +118,6 @@ if st.session_state.authenticated:
     except Exception:
 
         current_user = None
-
         is_radiologist = False
 
 
@@ -148,10 +127,7 @@ if st.session_state.authenticated:
 
 if not st.session_state.authenticated:
 
-    if (
-        st.session_state.auth_step
-        == "register"
-    ):
+    if st.session_state.auth_step == "register":
 
         show_auth()
 
@@ -163,14 +139,9 @@ if not st.session_state.authenticated:
         ):
 
             st.session_state.auth_step = "login"
-
             st.rerun()
 
-
-    elif (
-        st.session_state.auth_step
-        == "verify"
-    ):
+    elif st.session_state.auth_step == "verify":
 
         show_verification()
 
@@ -182,9 +153,7 @@ if not st.session_state.authenticated:
         ):
 
             st.session_state.auth_step = "login"
-
             st.rerun()
-
 
     else:
 
@@ -198,9 +167,7 @@ if not st.session_state.authenticated:
         ):
 
             st.session_state.auth_step = "register"
-
             st.rerun()
-
 
     st.stop()
 
@@ -221,19 +188,12 @@ st.caption(
 # ============================================================
 
 patient_pages = [
-
     "Dashboard",
-
     "AI Detection",
-
     "Examinations",
-
     "Reports",
-
     "Health",
-
     "Marketplace",
-
     "Profile",
 ]
 
@@ -245,21 +205,13 @@ patient_pages = [
 if is_radiologist:
 
     pages = [
-
         "Dashboard",
-
         "AI Detection",
-
         "Examinations",
-
         "Reports",
-
         "Health",
-
         "Marketplace",
-
         "Profile",
-
         "Radiologist",
     ]
 
@@ -276,16 +228,13 @@ selected_page = st.radio(
     "Main navigation",
     pages,
     index=(
-        pages.index(
-            st.session_state.page
-        )
+        pages.index(st.session_state.page)
         if st.session_state.page in pages
         else 0
     ),
     horizontal=True,
     label_visibility="collapsed",
 )
-
 
 st.session_state.page = selected_page
 
@@ -304,6 +253,21 @@ elif selected_page == "AI Detection":
     show_detection()
 
 
+elif selected_page == "Examinations":
+
+    st.title("Examinations")
+
+    st.info(
+        "Your examination history is available "
+        "on the Dashboard."
+    )
+
+
+elif selected_page == "Reports":
+
+    show_pdf_reports()
+
+
 elif selected_page == "Health":
 
     show_health()
@@ -313,8 +277,6 @@ elif selected_page == "Marketplace":
 
     show_marketplace()
 
-elif page == "Reports":
-    show_pdf_reports()
 
 elif selected_page == "Profile":
 
@@ -332,26 +294,6 @@ elif selected_page == "Radiologist":
         st.error(
             "Unauthorized access."
         )
-
-
-elif selected_page == "Examinations":
-
-    st.title("Examinations")
-
-    st.info(
-        "Your examination history is available "
-        "on the Dashboard."
-    )
-
-
-elif selected_page == "Reports":
-
-    st.title("Medical Reports")
-
-    st.info(
-        "Final reports become available only "
-        "after radiologist review and approval."
-    )
 
 
 # ============================================================
