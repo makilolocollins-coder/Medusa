@@ -14,7 +14,7 @@ from ui.health import show_health
 from ui.marketplace import show_marketplace
 from ui.profile import show_profile
 from ui.radiologist import show_radiologist
-
+from ui.dietitian import show_dietitian
 from reports.pdf_report import show_pdf_reports
 
 from ui.auth import (
@@ -207,6 +207,7 @@ patient_pages = [
     "Health",
     "Marketplace",
     "Profile",
+    "Nutrition",
 ]
 
 
@@ -221,6 +222,7 @@ if is_radiologist:
         "Marketplace",
         "Profile",
         "Radiologist",
+        "Nutrition",
     ]
 
 else:
@@ -289,6 +291,10 @@ elif selected_page == "Reports":
 elif selected_page == "Health":
 
     show_health()
+    
+elif selected_page == "Nutrition":
+
+    show_dietitian()
 
 
 elif selected_page == "Marketplace":
