@@ -15,7 +15,7 @@ from ui.marketplace import show_marketplace
 from ui.profile import show_profile
 from ui.radiologist import show_radiologist
 
-from reports.pdf_report import show_pdf_report
+from reports.pdf_report import show_pdf_reports
 
 from ui.auth import (
     show_auth,
@@ -277,8 +277,8 @@ elif selected_page == "Examinations":
         "on the Dashboard."
     )
 
-
 elif selected_page == "Reports":
+    show_pdf_reports()
 
     # IMPORTANT:
     # Reports are loaded from reports/pdf_report.py
