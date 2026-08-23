@@ -18,6 +18,10 @@ from ai.pneumonia import (
     predict as predict_pneumonia,
 )
 
+from ai.tuberculosis import (
+    load_model as load_tb_model,
+    predict as predict_tb,
+)
 
 STATES = [
     "Abia", "Adamawa", "Akwa Ibom", "Anambra", "Bauchi",
@@ -189,28 +193,45 @@ def show_detection():
     st.subheader("Examination")
 
     model_choice = st.selectbox(
-        "AI model",
-        [
-            "MammoSense — Breast Ultrasound",
-            "MammoSense Pneumonia — Chest X-ray",
-        ],
-        key="medical_model_input",
-    )
+    "AI model",
+    [
+        "MammoSense — Breast Ultrasound",
+        "MammoSense Pneumonia — Chest X-ray",
+        "MammoSense Tuberculosis — Chest X-ray",
+    ],
+    key="medical_model_input",
+)
 
     pneumonia = (
-        model_choice
-        == "MammoSense Pneumonia — Chest X-ray"
-    )
+    model_choice
+    == "MammoSense Pneumonia — Chest X-ray"
+)
 
-    examination = (
-        "Chest X-ray" if pneumonia else "Breast Ultrasound"
-    )
+tuberculosis = (
+    model_choice
+    == "MammoSense Tuberculosis — Chest X-ray"
+)
 
-    model_name = (
-        "MammoSense Pneumonia V2"
-        if pneumonia
-        else "MammoSense V2"
-    )
+if pneumonia or tuberculosis:
+
+    examination = "Chest X-ray"
+
+else:
+
+    examination = "Breast Ultrasound"
+
+
+if pneumonia:
+
+    model_name = "MammoSense Pneumonia V2"
+
+elif tuberculosis:
+
+    model_name = "MammoSense Tuberculosis V1"
+
+else:
+
+    model_name = "MammoSense V2"
 
     st.info(
         f"Upload a {examination.lower()} for "
@@ -279,11 +300,19 @@ def show_detection():
             with st.spinner("Medusa AI is analyzing..."):
 
                 if pneumonia:
-                    load_pneumonia_model()
-                    result = predict_pneumonia(image)
-                else:
-                    load_mammo_model()
-                    result = predict_mammo(image)
+
+    load_pneumonia_model()
+    result = predict_pneumonia(image)
+
+elif tuberculosis:
+
+    load_tb_model()
+    result = predict_tb(image)
+
+else:
+
+    load_mammo_model()
+    result = predict_mammo(image)
 
             sb = get_supabase()
 
