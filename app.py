@@ -14,6 +14,7 @@ from ui.health import show_health
 from ui.marketplace import show_marketplace
 from ui.profile import show_profile
 from ui.radiologist import show_radiologist
+from reports.pdf_reports_page import show_pdf_reports
 
 from ui.auth import (
     show_auth,
@@ -312,6 +313,8 @@ elif selected_page == "Marketplace":
 
     show_marketplace()
 
+elif page == "Reports":
+    show_pdf_reports()
 
 elif selected_page == "Profile":
 
