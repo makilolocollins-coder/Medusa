@@ -205,57 +205,55 @@ def show_detection():
     )
 
     # ============================================================
-    # PATIENT REGISTRATION
-    # ============================================================
+# PATIENT REGISTRATION
+# ============================================================
 
-    st.subheader("Patient Registration")
+st.subheader("Patient Registration")
 
-    col1, col2 = st.columns(2)
+col1, col2 = st.columns(2)
 
-    with col1:
+with col1:
 
-        patient_name = st.text_input(
-            "Patient full name",
-            value=st.session_state.patient_name,
-            placeholder="Enter patient's full name",
-            key="patient_name",
-        )
+    patient_name = st.text_input(
+        "Patient full name",
+        value=st.session_state.patient_name,
+        placeholder="Enter patient's full name",
+        key="patient_name_input",
+    )
 
-    with col2:
+with col2:
 
-        patient_state = st.selectbox(
-            "State",
-            NIGERIAN_STATES,
-            index=(
-                NIGERIAN_STATES.index(
-                    st.session_state.patient_state
-                )
-                if st.session_state.patient_state
-                in NIGERIAN_STATES
-                else 0
-            ),
-            key="patient_state",
-        )
-
-    patient_name = patient_name.strip()
-
-    if patient_name:
-
-        st.session_state.patient_name = patient_name
-
-        if not st.session_state.patient_id:
-
-            st.session_state.patient_id = (
-                generate_patient_id()
+    patient_state = st.selectbox(
+        "State",
+        NIGERIAN_STATES,
+        index=(
+            NIGERIAN_STATES.index(
+                st.session_state.patient_state
             )
+            if st.session_state.patient_state
+            in NIGERIAN_STATES
+            else 0
+        ),
+        key="patient_state",
+    )
 
-    st.session_state.patient_state = patient_state
+patient_name = patient_name.strip()
 
-    if st.session_state.patient_id:
+if patient_name:
 
-        st.info(
-            f"Patient ID: {st.session_state.patient_id}"
+    st.session_state.patient_name = patient_name
+
+    if not st.session_state.patient_id:
+
+        st.session_state.patient_id = (
+            generate_patient_id()
         )
+
+if st.session_state.patient_id:
+
+    st.info(
+        f"Patient ID: {st.session_state.patient_id}"
+    )
 
     # ============================================================
     # NEW EXAMINATION
