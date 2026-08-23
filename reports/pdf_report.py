@@ -1,385 +1,788 @@
-import streamlit as st
-from utils.supabase_client import get_supabase
+# ================================================================
+# MEDUSA AI
+# PDF MEDICAL REPORT GENERATOR
+# ================================================================
+
+import io
+import uuid
+from datetime import datetime
+
+from PIL import Image
+
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import mm
+from reportlab.platypus import (
+    SimpleDocTemplate,
+    Paragraph,
+    Spacer,
+    Table,
+    TableStyle,
+    Image as RLImage,
+    HRFlowable,
+)
 
 
-SCAN_BUCKET = "mammosense-scans"
-REPORT_BUCKET = "medical-reports"
+# ================================================================
+# REPORT ID
+# ================================================================
+
+def generate_report_id():
+    return (
+        "MED-R-"
+        + datetime.now().strftime("%Y%m%d")
+        + "-"
+        + uuid.uuid4().hex[:8].upper()
+    )
 
 
-def get_user():
+# ================================================================
+# SAFE TEXT
+# ================================================================
+
+def safe(value):
+    if value is None:
+        return ""
+
+    return (
+        str(value)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\n", "<br/>")
+    )
+
+
+# ================================================================
+# SAFE CONFIDENCE
+# ================================================================
+
+def format_confidence(value):
     try:
-        response = get_supabase().auth.get_user()
-        return response.user if response else None
+        value = float(value)
+
+        if value > 1:
+            value = value / 100
+
+        return f"{value:.1%}"
+
+    except (TypeError, ValueError):
+        return "N/A"
+
+
+# ================================================================
+# IMAGE
+# ================================================================
+
+def make_report_image(image_bytes, width=150 * mm):
+
+    if not image_bytes:
+        return None
+
+    try:
+        image = Image.open(io.BytesIO(image_bytes))
+        image = image.convert("RGB")
+
+        buffer = io.BytesIO()
+
+        image.save(
+            buffer,
+            format="JPEG",
+            quality=90,
+        )
+
+        buffer.seek(0)
+
+        if image.width <= 0:
+            return None
+
+        ratio = image.height / image.width
+        height = width * ratio
+
+        # Prevent extremely large images from breaking the PDF.
+        max_height = 220 * mm
+
+        if height > max_height:
+            height = max_height
+            width = height / ratio
+
+        return RLImage(
+            buffer,
+            width=width,
+            height=height,
+        )
+
     except Exception:
         return None
 
 
-def show_pdf_reports():
+# ================================================================
+# MAIN PDF GENERATOR
+# ================================================================
 
-    st.title("Medical Reports")
-    st.caption("Radiologist-approved medical reports")
+def generate_pdf_report(
+    patient_name,
+    patient_id,
+    state,
+    examination,
+    ai_prediction,
+    ai_confidence,
+    probabilities,
+    radiologist_name,
+    registration_number,
+    findings,
+    impression,
+    recommendations,
+    remarks,
+    reviewed_at,
+    xray_image=None,
+    ultrasound_image=None,
+):
 
-    supabase = get_supabase()
-    user = get_user()
+    report_id = generate_report_id()
 
-    if not user:
-        st.error("Please log in to view your reports.")
-        return
+    buffer = io.BytesIO()
+
+    document = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=18 * mm,
+        leftMargin=18 * mm,
+        topMargin=18 * mm,
+        bottomMargin=18 * mm,
+        title="Medusa AI Medical Report",
+        author="Medusa AI",
+    )
+
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle(
+        "MedusaReportTitle",
+        parent=styles["Title"],
+        fontName="Helvetica-Bold",
+        fontSize=18,
+        leading=22,
+        alignment=TA_CENTER,
+        textColor=colors.HexColor("#163A5F"),
+        spaceAfter=3 * mm,
+    )
+
+    subtitle_style = ParagraphStyle(
+        "MedusaReportSubtitle",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=9,
+        leading=12,
+        alignment=TA_CENTER,
+        textColor=colors.HexColor("#555555"),
+        spaceAfter=4 * mm,
+    )
+
+    heading_style = ParagraphStyle(
+        "MedusaSectionHeading",
+        parent=styles["Heading2"],
+        fontName="Helvetica-Bold",
+        fontSize=11,
+        leading=14,
+        textColor=colors.HexColor("#163A5F"),
+        spaceBefore=5 * mm,
+        spaceAfter=3 * mm,
+    )
+
+    body_style = ParagraphStyle(
+        "MedusaBody",
+        parent=styles["BodyText"],
+        fontName="Helvetica",
+        fontSize=9.5,
+        leading=14,
+        spaceAfter=2 * mm,
+    )
+
+    small_style = ParagraphStyle(
+        "MedusaSmall",
+        parent=styles["BodyText"],
+        fontName="Helvetica",
+        fontSize=8,
+        leading=11,
+        textColor=colors.HexColor("#555555"),
+    )
+
+    impression_style = ParagraphStyle(
+        "MedusaImpression",
+        parent=body_style,
+        fontName="Helvetica-Bold",
+        fontSize=10,
+        leading=14,
+    )
+
+    story = []
 
     # ============================================================
-    # FIND PATIENT REPORTS
+    # HEADER
     # ============================================================
 
-    try:
-        response = (
-            supabase
-            .table("medical_reports")
-            .select(
-                "id,report_id,scan_id,review_id,user_id,"
-                "patient_id,patient_name,pdf_path,status,"
-                "approved_at,created_at"
-            )
-            .eq("status", "APPROVED")
-            .order("approved_at", desc=True)
-            .execute()
+    story.append(
+        Paragraph(
+            "MEDUSA AI",
+            title_style,
         )
+    )
 
-        all_reports = response.data or []
-
-    except Exception as e:
-        st.error("Unable to load medical reports.")
-        st.exception(e)
-        return
-
-    # ------------------------------------------------------------
-    # Match reports to the logged-in patient.
-    #
-    # user_id is checked first, but patient_id is also supported.
-    # This prevents reports from disappearing if the report was
-    # created by the radiologist account.
-    # ------------------------------------------------------------
-
-    reports = [
-        r for r in all_reports
-        if r.get("user_id") == user.id
-        or r.get("patient_id")
-    ]
-
-    # If patient_id is not an auth UUID, use the patient's scans
-    # belonging to this logged-in account to identify ownership.
-
-    if reports:
-
-        try:
-            scan_response = (
-                supabase
-                .table("ai_scans")
-                .select("id,patient_id")
-                .eq("user_id", user.id)
-                .execute()
-            )
-
-            user_scans = scan_response.data or []
-            user_scan_ids = {
-                x.get("id") for x in user_scans
-            }
-            user_patient_ids = {
-                x.get("patient_id") for x in user_scans
-            }
-
-            reports = [
-                r for r in reports
-                if (
-                    r.get("user_id") == user.id
-                    or r.get("scan_id") in user_scan_ids
-                    or r.get("patient_id") in user_patient_ids
-                )
-            ]
-
-        except Exception:
-            reports = [
-                r for r in reports
-                if r.get("user_id") == user.id
-            ]
-
-    if not reports:
-        st.info(
-            "No radiologist-approved medical reports "
-            "are available yet."
+    story.append(
+        Paragraph(
+            "AI-ASSISTED MEDICAL IMAGING REPORT",
+            subtitle_style,
         )
-        return
+    )
 
-    st.success(
-        f"{len(reports)} approved report"
-        + ("s" if len(reports) != 1 else "")
-        + " available."
+    story.append(
+        HRFlowable(
+            width="100%",
+            thickness=1,
+            color=colors.HexColor("#163A5F"),
+        )
+    )
+
+    story.append(
+        Spacer(1, 4 * mm)
     )
 
     # ============================================================
-    # REPORTS
+    # REPORT IDENTIFICATION
     # ============================================================
 
-    for report in reports:
+    identification = [
+        [
+            Paragraph("<b>Report ID</b>", body_style),
+            Paragraph(safe(report_id), body_style),
+            Paragraph("<b>Report Date</b>", body_style),
+            Paragraph(
+                datetime.now().strftime("%d %B %Y"),
+                body_style,
+            ),
+        ],
+        [
+            Paragraph("<b>Examination</b>", body_style),
+            Paragraph(safe(examination), body_style),
+            Paragraph("<b>Patient ID</b>", body_style),
+            Paragraph(safe(patient_id), body_style),
+        ],
+    ]
 
-        report_id = (
-            report.get("report_id")
-            or report.get("id")
-            or "N/A"
+    identification_table = Table(
+        identification,
+        colWidths=[
+            28 * mm,
+            62 * mm,
+            28 * mm,
+            62 * mm,
+        ],
+    )
+
+    identification_table.setStyle(
+        TableStyle(
+            [
+                (
+                    "BACKGROUND",
+                    (0, 0),
+                    (-1, -1),
+                    colors.HexColor("#F4F7FA"),
+                ),
+                (
+                    "BOX",
+                    (0, 0),
+                    (-1, -1),
+                    0.5,
+                    colors.HexColor("#D5DDE5"),
+                ),
+                (
+                    "INNERGRID",
+                    (0, 0),
+                    (-1, -1),
+                    0.25,
+                    colors.HexColor("#E0E5EA"),
+                ),
+                (
+                    "VALIGN",
+                    (0, 0),
+                    (-1, -1),
+                    "TOP",
+                ),
+                (
+                    "LEFTPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    6,
+                ),
+                (
+                    "RIGHTPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    6,
+                ),
+                (
+                    "TOPPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    6,
+                ),
+                (
+                    "BOTTOMPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    6,
+                ),
+            ]
+        )
+    )
+
+    story.append(identification_table)
+
+    # ============================================================
+    # PATIENT INFORMATION
+    # ============================================================
+
+    story.append(
+        Paragraph(
+            "PATIENT INFORMATION",
+            heading_style,
+        )
+    )
+
+    patient_table = Table(
+        [
+            [
+                Paragraph("<b>Patient Name</b>", body_style),
+                Paragraph(safe(patient_name), body_style),
+            ],
+            [
+                Paragraph("<b>Patient ID</b>", body_style),
+                Paragraph(safe(patient_id), body_style),
+            ],
+            [
+                Paragraph("<b>State</b>", body_style),
+                Paragraph(safe(state), body_style),
+            ],
+        ],
+        colWidths=[
+            45 * mm,
+            135 * mm,
+        ],
+    )
+
+    patient_table.setStyle(
+        TableStyle(
+            [
+                (
+                    "BOX",
+                    (0, 0),
+                    (-1, -1),
+                    0.5,
+                    colors.HexColor("#D5DDE5"),
+                ),
+                (
+                    "INNERGRID",
+                    (0, 0),
+                    (-1, -1),
+                    0.25,
+                    colors.HexColor("#E0E5EA"),
+                ),
+                (
+                    "VALIGN",
+                    (0, 0),
+                    (-1, -1),
+                    "TOP",
+                ),
+                (
+                    "BACKGROUND",
+                    (0, 0),
+                    (0, -1),
+                    colors.HexColor("#F4F7FA"),
+                ),
+            ]
+        )
+    )
+
+    story.append(patient_table)
+
+    # ============================================================
+    # AI SCREENING
+    # ============================================================
+
+    story.append(
+        Paragraph(
+            "AI SCREENING RESULT",
+            heading_style,
+        )
+    )
+
+    ai_table = Table(
+        [
+            [
+                Paragraph("<b>AI System</b>", body_style),
+                Paragraph("Medusa AI", body_style),
+            ],
+            [
+                Paragraph("<b>AI Finding</b>", body_style),
+                Paragraph(safe(ai_prediction), body_style),
+            ],
+            [
+                Paragraph("<b>AI Confidence</b>", body_style),
+                Paragraph(
+                    format_confidence(ai_confidence),
+                    body_style,
+                ),
+            ],
+        ],
+        colWidths=[
+            45 * mm,
+            135 * mm,
+        ],
+    )
+
+    ai_table.setStyle(
+        TableStyle(
+            [
+                (
+                    "BOX",
+                    (0, 0),
+                    (-1, -1),
+                    0.5,
+                    colors.HexColor("#D5DDE5"),
+                ),
+                (
+                    "INNERGRID",
+                    (0, 0),
+                    (-1, -1),
+                    0.25,
+                    colors.HexColor("#E0E5EA"),
+                ),
+                (
+                    "BACKGROUND",
+                    (0, 0),
+                    (0, -1),
+                    colors.HexColor("#F4F7FA"),
+                ),
+                (
+                    "VALIGN",
+                    (0, 0),
+                    (-1, -1),
+                    "TOP",
+                ),
+            ]
+        )
+    )
+
+    story.append(ai_table)
+
+    # ============================================================
+    # PROBABILITIES
+    # ============================================================
+
+    if isinstance(probabilities, dict) and probabilities:
+
+        story.append(
+            Paragraph(
+                "AI PROBABILITY BREAKDOWN",
+                heading_style,
+            )
         )
 
-        scan_id = report.get("scan_id")
-        patient_id = report.get("patient_id") or "N/A"
-        patient_name = (
-            report.get("patient_name")
-            or "N/A"
-        )
+        probability_rows = [
+            [
+                Paragraph("<b>Class</b>", body_style),
+                Paragraph("<b>Probability</b>", body_style),
+            ]
+        ]
 
-        pdf_path = report.get("pdf_path")
-        approved_at = (
-            report.get("approved_at")
-            or "N/A"
-        )
-
-        # --------------------------------------------------------
-        # GET SCAN
-        # --------------------------------------------------------
-
-        scan = {}
-
-        if scan_id:
+        for name, value in probabilities.items():
 
             try:
+                numeric_value = float(value)
 
-                result = (
-                    supabase
-                    .table("ai_scans")
-                    .select(
-                        "id,user_id,patient_id,patient_name,"
-                        "patient_state,examination,model,"
-                        "prediction,confidence,probabilities,"
-                        "image_path,status,created_at"
-                    )
-                    .eq("id", scan_id)
-                    .limit(1)
-                    .execute()
-                )
+                if numeric_value > 1:
+                    numeric_value = numeric_value / 100
 
-                if result.data:
-                    scan = result.data[0]
+                formatted_value = f"{numeric_value:.2%}"
 
-            except Exception:
-                pass
+            except (TypeError, ValueError):
+                formatted_value = "N/A"
 
-        # Use scan information as fallback.
-        patient_name = (
-            patient_name
-            if patient_name != "N/A"
-            else scan.get("patient_name", "N/A")
-        )
-
-        patient_id = (
-            patient_id
-            if patient_id != "N/A"
-            else scan.get("patient_id", "N/A")
-        )
-
-        # ========================================================
-        # REPORT CARD
-        # ========================================================
-
-        with st.container(border=True):
-
-            st.subheader(
-                f"MEDUSA AI REPORT"
+            probability_rows.append(
+                [
+                    Paragraph(
+                        safe(name),
+                        body_style,
+                    ),
+                    Paragraph(
+                        formatted_value,
+                        body_style,
+                    ),
+                ]
             )
 
-            st.success("RADIOLOGIST APPROVED")
+        probability_table = Table(
+            probability_rows,
+            colWidths=[
+                100 * mm,
+                80 * mm,
+            ],
+        )
 
-            # ----------------------------------------------------
-            # PATIENT INFORMATION
-            # ----------------------------------------------------
-
-            st.markdown("### Patient Information")
-
-            c1, c2 = st.columns(2)
-
-            with c1:
-                st.write(
-                    f"**Patient Name:** {patient_name}"
-                )
-
-                st.write(
-                    f"**Patient ID:** {patient_id}"
-                )
-
-                st.write(
-                    f"**State:** "
-                    f"{scan.get('patient_state', 'N/A')}"
-                )
-
-            with c2:
-
-                st.write(
-                    f"**Report ID:** {report_id}"
-                )
-
-                st.write(
-                    f"**Review ID:** "
-                    f"{report.get('review_id') or 'N/A'}"
-                )
-
-                st.write(
-                    f"**Approved:** {approved_at}"
-                )
-
-            # ----------------------------------------------------
-            # EXAMINATION
-            # ----------------------------------------------------
-
-            st.divider()
-            st.markdown("### Examination")
-
-            c1, c2, c3 = st.columns(3)
-
-            with c1:
-                st.write(
-                    f"**Examination:** "
-                    f"{scan.get('examination', 'N/A')}"
-                )
-
-            with c2:
-                st.write(
-                    f"**Model:** "
-                    f"{scan.get('model', 'N/A')}"
-                )
-
-            with c3:
-
-                confidence = scan.get("confidence")
-
-                if confidence is not None:
-
-                    try:
-                        st.write(
-                            f"**AI Confidence:** "
-                            f"{float(confidence):.1%}"
-                        )
-                    except Exception:
-                        st.write(
-                            f"**AI Confidence:** "
-                            f"{confidence}"
-                        )
-
-                else:
-                    st.write(
-                        "**AI Confidence:** N/A"
-                    )
-
-            prediction = scan.get("prediction")
-
-            if prediction:
-                st.info(
-                    f"AI Finding: {prediction}"
-                )
-
-            # ----------------------------------------------------
-            # ORIGINAL SCAN
-            # ----------------------------------------------------
-
-            image_path = scan.get("image_path")
-
-            if image_path:
-
-                st.markdown(
-                    "### Examination Image"
-                )
-
-                try:
-
-                    image_bytes = (
-                        supabase
-                        .storage
-                        .from_(SCAN_BUCKET)
-                        .download(image_path)
-                    )
-
-                    if image_bytes:
-
-                        st.image(
-                            image_bytes,
-                            caption="Original Examination Scan",
-                            use_container_width=True,
-                        )
-
-                    else:
-
-                        st.warning(
-                            "The examination image could not "
-                            "be retrieved."
-                        )
-
-                except Exception as e:
-
-                    st.warning(
-                        "The examination image could not "
-                        "be loaded."
-                    )
-
-            # ----------------------------------------------------
-            # PDF DOWNLOAD
-            # ----------------------------------------------------
-
-            st.divider()
-            st.markdown(
-                "### Final Medical Report"
+        probability_table.setStyle(
+            TableStyle(
+                [
+                    (
+                        "BOX",
+                        (0, 0),
+                        (-1, -1),
+                        0.5,
+                        colors.HexColor("#D5DDE5"),
+                    ),
+                    (
+                        "INNERGRID",
+                        (0, 0),
+                        (-1, -1),
+                        0.25,
+                        colors.HexColor("#E0E5EA"),
+                    ),
+                    (
+                        "BACKGROUND",
+                        (0, 0),
+                        (-1, 0),
+                        colors.HexColor("#F4F7FA"),
+                    ),
+                ]
             )
+        )
 
-            if not pdf_path:
+        story.append(probability_table)
 
-                st.warning(
-                    "This report has been approved, but "
-                    "the PDF has not been attached yet."
-                )
+    # ============================================================
+    # EXAMINATION IMAGE
+    # ============================================================
 
-                continue
+    examination_image = (
+        xray_image
+        if xray_image
+        else ultrasound_image
+    )
 
-            try:
+    report_image = make_report_image(
+        examination_image
+    )
 
-                pdf_bytes = (
-                    supabase
-                    .storage
-                    .from_(REPORT_BUCKET)
-                    .download(pdf_path)
-                )
+    if report_image:
 
-                if not pdf_bytes:
+        story.append(
+            Paragraph(
+                "EXAMINATION IMAGE",
+                heading_style,
+            )
+        )
 
-                    st.warning(
-                        "The approved PDF could not be retrieved."
-                    )
+        story.append(report_image)
 
-                    continue
+    # ============================================================
+    # RADIOLOGIST REPORT
+    # ============================================================
 
-                st.download_button(
-                    label="Download Final Medical Report",
-                    data=pdf_bytes,
-                    file_name=f"{report_id}.pdf",
-                    mime="application/pdf",
-                    type="primary",
-                    use_container_width=True,
-                    key=f"download_{report.get('id')}",
-                )
+    story.append(
+        Paragraph(
+            "RADIOLOGIST REPORT",
+            heading_style,
+        )
+    )
 
-                st.caption(
-                    "This report was approved by a qualified "
-                    "radiologist."
-                )
+    story.append(
+        Paragraph(
+            "<b>Findings</b>",
+            body_style,
+        )
+    )
 
-            except Exception as e:
+    story.append(
+        Paragraph(
+            safe(findings) or "Not provided.",
+            body_style,
+        )
+    )
 
-                st.error(
-                    "The report is approved, but the PDF "
-                    "could not be downloaded."
-                )
+    story.append(
+        Paragraph(
+            "<b>Impression</b>",
+            body_style,
+        )
+    )
 
-                st.exception(e)
+    story.append(
+        Paragraph(
+            safe(impression) or "Not provided.",
+            impression_style,
+        )
+    )
+
+    if recommendations:
+
+        story.append(
+            Paragraph(
+                "<b>Recommendations</b>",
+                body_style,
+            )
+        )
+
+        story.append(
+            Paragraph(
+                safe(recommendations),
+                body_style,
+            )
+        )
+
+    if remarks:
+
+        story.append(
+            Paragraph(
+                "<b>Radiologist Remarks</b>",
+                body_style,
+            )
+        )
+
+        story.append(
+            Paragraph(
+                safe(remarks),
+                body_style,
+            )
+        )
+
+    # ============================================================
+    # RADIOLOGIST AUTHENTICATION
+    # ============================================================
+
+    story.append(
+        Paragraph(
+            "RADIOLOGIST AUTHENTICATION",
+            heading_style,
+        )
+    )
+
+    radiologist_table = Table(
+        [
+            [
+                Paragraph("<b>Radiologist</b>", body_style),
+                Paragraph(
+                    safe(radiologist_name),
+                    body_style,
+                ),
+            ],
+            [
+                Paragraph(
+                    "<b>Registration Number</b>",
+                    body_style,
+                ),
+                Paragraph(
+                    safe(registration_number),
+                    body_style,
+                ),
+            ],
+            [
+                Paragraph("<b>Reviewed At</b>", body_style),
+                Paragraph(
+                    safe(reviewed_at),
+                    body_style,
+                ),
+            ],
+            [
+                Paragraph("<b>Review Status</b>", body_style),
+                Paragraph("APPROVED", body_style),
+            ],
+        ],
+        colWidths=[
+            55 * mm,
+            125 * mm,
+        ],
+    )
+
+    radiologist_table.setStyle(
+        TableStyle(
+            [
+                (
+                    "BOX",
+                    (0, 0),
+                    (-1, -1),
+                    0.5,
+                    colors.HexColor("#D5DDE5"),
+                ),
+                (
+                    "INNERGRID",
+                    (0, 0),
+                    (-1, -1),
+                    0.25,
+                    colors.HexColor("#E0E5EA"),
+                ),
+                (
+                    "BACKGROUND",
+                    (0, 0),
+                    (0, -1),
+                    colors.HexColor("#F4F7FA"),
+                ),
+            ]
+        )
+    )
+
+    story.append(radiologist_table)
+
+    # ============================================================
+    # DISCLAIMER
+    # ============================================================
+
+    story.append(
+        Spacer(1, 7 * mm)
+    )
+
+    story.append(
+        HRFlowable(
+            width="100%",
+            thickness=0.5,
+            color=colors.HexColor("#D5DDE5"),
+        )
+    )
+
+    story.append(
+        Spacer(1, 3 * mm)
+    )
+
+    story.append(
+        Paragraph(
+            "<b>IMPORTANT:</b> This report contains "
+            "AI-assisted screening information together "
+            "with the professional interpretation of the "
+            "reviewing radiologist. The radiologist's "
+            "interpretation takes precedence over the AI "
+            "screening output. This report should be "
+            "interpreted in the appropriate clinical context.",
+            small_style,
+        )
+    )
+
+    story.append(
+        Spacer(1, 4 * mm)
+    )
+
+    story.append(
+        Paragraph(
+            f"Report ID: {safe(report_id)}",
+            small_style,
+        )
+    )
+
+    # ============================================================
+    # BUILD PDF
+    # ============================================================
+
+    document.build(story)
+
+    buffer.seek(0)
+
+    return buffer, report_id
