@@ -14,7 +14,7 @@ from ui.health import show_health
 from ui.marketplace import show_marketplace
 from ui.profile import show_profile
 from ui.radiologist import show_radiologist
-from reports.pdf_reports_page import show_pdf_reports
+from reports.pdf_reports import show_pdf_reports
 
 from ui.auth import (
     show_auth,
