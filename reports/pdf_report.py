@@ -1,18 +1,35 @@
 # ================================================================
 # MEDUSA AI
-# PDF MEDICAL REPORT GENERATOR
+# reports/pdf_report.py
+#
+# Contains BOTH:
+# 1. Final PDF medical report generator
+# 2. Medical Reports page for Streamlit
+#
+# IMPORTANT:
+# app.py should import:
+#
+# from reports.pdf_report import (
+#     generate_pdf_report,
+#     show_pdf_reports,
+# )
 # ================================================================
 
 import io
+import json
 import uuid
 from datetime import datetime
 
+import streamlit as st
 from PIL import Image
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.styles import (
+    ParagraphStyle,
+    getSampleStyleSheet,
+)
 from reportlab.lib.units import mm
 from reportlab.platypus import (
     SimpleDocTemplate,
@@ -23,6 +40,8 @@ from reportlab.platypus import (
     Image as RLImage,
     HRFlowable,
 )
+
+from utils.supabase_client import get_supabase
 
 
 # ================================================================
@@ -39,7 +58,7 @@ def generate_report_id():
 
 
 # ================================================================
-# SAFE TEXT
+# SAFE TEXT FOR REPORTLAB
 # ================================================================
 
 def safe(value):
@@ -56,34 +75,55 @@ def safe(value):
 
 
 # ================================================================
-# SAFE CONFIDENCE
+# SAFE FLOAT
 # ================================================================
 
-def format_confidence(value):
+def safe_float(value, default=0.0):
     try:
-        value = float(value)
-
-        if value > 1:
-            value = value / 100
-
-        return f"{value:.1%}"
-
+        return float(value)
     except (TypeError, ValueError):
-        return "N/A"
+        return default
+
+
+# ================================================================
+# NORMALIZE CONFIDENCE
+# ================================================================
+
+def normalize_confidence(value):
+    """
+    Handles both:
+        0.95  -> 95%
+        95    -> 95%
+    """
+
+    confidence = safe_float(value)
+
+    if confidence > 1:
+        confidence = confidence / 100.0
+
+    return max(0.0, min(confidence, 1.0))
 
 
 # ================================================================
 # IMAGE
 # ================================================================
 
-def make_report_image(image_bytes, width=150 * mm):
-
+def make_report_image(
+    image_bytes,
+    width=150 * mm,
+):
     if not image_bytes:
         return None
 
     try:
-        image = Image.open(io.BytesIO(image_bytes))
-        image = image.convert("RGB")
+        image = Image.open(
+            io.BytesIO(image_bytes)
+        ).convert("RGB")
+
+        original_width, original_height = image.size
+
+        if original_width <= 0 or original_height <= 0:
+            return None
 
         buffer = io.BytesIO()
 
@@ -95,14 +135,11 @@ def make_report_image(image_bytes, width=150 * mm):
 
         buffer.seek(0)
 
-        if image.width <= 0:
-            return None
-
-        ratio = image.height / image.width
+        ratio = original_height / original_width
         height = width * ratio
 
         # Prevent extremely large images from breaking the PDF.
-        max_height = 220 * mm
+        max_height = 180 * mm
 
         if height > max_height:
             height = max_height
@@ -140,7 +177,6 @@ def generate_pdf_report(
     xray_image=None,
     ultrasound_image=None,
 ):
-
     report_id = generate_report_id()
 
     buffer = io.BytesIO()
@@ -159,40 +195,38 @@ def generate_pdf_report(
     styles = getSampleStyleSheet()
 
     title_style = ParagraphStyle(
-        "MedusaReportTitle",
+        "ReportTitle",
         parent=styles["Title"],
         fontName="Helvetica-Bold",
         fontSize=18,
         leading=22,
         alignment=TA_CENTER,
-        textColor=colors.HexColor("#163A5F"),
-        spaceAfter=3 * mm,
+        spaceAfter=5 * mm,
     )
 
     subtitle_style = ParagraphStyle(
-        "MedusaReportSubtitle",
+        "ReportSubtitle",
         parent=styles["Normal"],
         fontName="Helvetica",
         fontSize=9,
         leading=12,
         alignment=TA_CENTER,
         textColor=colors.HexColor("#555555"),
-        spaceAfter=4 * mm,
     )
 
     heading_style = ParagraphStyle(
-        "MedusaSectionHeading",
+        "SectionHeading",
         parent=styles["Heading2"],
         fontName="Helvetica-Bold",
         fontSize=11,
         leading=14,
-        textColor=colors.HexColor("#163A5F"),
         spaceBefore=5 * mm,
         spaceAfter=3 * mm,
+        textColor=colors.HexColor("#163A5F"),
     )
 
     body_style = ParagraphStyle(
-        "MedusaBody",
+        "ReportBody",
         parent=styles["BodyText"],
         fontName="Helvetica",
         fontSize=9.5,
@@ -201,7 +235,7 @@ def generate_pdf_report(
     )
 
     small_style = ParagraphStyle(
-        "MedusaSmall",
+        "ReportSmall",
         parent=styles["BodyText"],
         fontName="Helvetica",
         fontSize=8,
@@ -210,7 +244,7 @@ def generate_pdf_report(
     )
 
     impression_style = ParagraphStyle(
-        "MedusaImpression",
+        "ReportImpression",
         parent=body_style,
         fontName="Helvetica-Bold",
         fontSize=10,
@@ -238,6 +272,13 @@ def generate_pdf_report(
     )
 
     story.append(
+        Spacer(
+            1,
+            3 * mm,
+        )
+    )
+
+    story.append(
         HRFlowable(
             width="100%",
             thickness=1,
@@ -246,7 +287,10 @@ def generate_pdf_report(
     )
 
     story.append(
-        Spacer(1, 4 * mm)
+        Spacer(
+            1,
+            4 * mm,
+        )
     )
 
     # ============================================================
@@ -282,60 +326,58 @@ def generate_pdf_report(
     )
 
     identification_table.setStyle(
-        TableStyle(
-            [
-                (
-                    "BACKGROUND",
-                    (0, 0),
-                    (-1, -1),
-                    colors.HexColor("#F4F7FA"),
-                ),
-                (
-                    "BOX",
-                    (0, 0),
-                    (-1, -1),
-                    0.5,
-                    colors.HexColor("#D5DDE5"),
-                ),
-                (
-                    "INNERGRID",
-                    (0, 0),
-                    (-1, -1),
-                    0.25,
-                    colors.HexColor("#E0E5EA"),
-                ),
-                (
-                    "VALIGN",
-                    (0, 0),
-                    (-1, -1),
-                    "TOP",
-                ),
-                (
-                    "LEFTPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    6,
-                ),
-                (
-                    "RIGHTPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    6,
-                ),
-                (
-                    "TOPPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    6,
-                ),
-                (
-                    "BOTTOMPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    6,
-                ),
-            ]
-        )
+        TableStyle([
+            (
+                "BACKGROUND",
+                (0, 0),
+                (-1, -1),
+                colors.HexColor("#F4F7FA"),
+            ),
+            (
+                "BOX",
+                (0, 0),
+                (-1, -1),
+                0.5,
+                colors.HexColor("#D5DDE5"),
+            ),
+            (
+                "INNERGRID",
+                (0, 0),
+                (-1, -1),
+                0.25,
+                colors.HexColor("#E0E5EA"),
+            ),
+            (
+                "VALIGN",
+                (0, 0),
+                (-1, -1),
+                "TOP",
+            ),
+            (
+                "LEFTPADDING",
+                (0, 0),
+                (-1, -1),
+                6,
+            ),
+            (
+                "RIGHTPADDING",
+                (0, 0),
+                (-1, -1),
+                6,
+            ),
+            (
+                "TOPPADDING",
+                (0, 0),
+                (-1, -1),
+                6,
+            ),
+            (
+                "BOTTOMPADDING",
+                (0, 0),
+                (-1, -1),
+                6,
+            ),
+        ])
     )
 
     story.append(identification_table)
@@ -358,12 +400,12 @@ def generate_pdf_report(
                 Paragraph(safe(patient_name), body_style),
             ],
             [
-                Paragraph("<b>Patient ID</b>", body_style),
-                Paragraph(safe(patient_id), body_style),
-            ],
-            [
                 Paragraph("<b>State</b>", body_style),
                 Paragraph(safe(state), body_style),
+            ],
+            [
+                Paragraph("<b>Patient ID</b>", body_style),
+                Paragraph(safe(patient_id), body_style),
             ],
         ],
         colWidths=[
@@ -373,36 +415,28 @@ def generate_pdf_report(
     )
 
     patient_table.setStyle(
-        TableStyle(
-            [
-                (
-                    "BOX",
-                    (0, 0),
-                    (-1, -1),
-                    0.5,
-                    colors.HexColor("#D5DDE5"),
-                ),
-                (
-                    "INNERGRID",
-                    (0, 0),
-                    (-1, -1),
-                    0.25,
-                    colors.HexColor("#E0E5EA"),
-                ),
-                (
-                    "VALIGN",
-                    (0, 0),
-                    (-1, -1),
-                    "TOP",
-                ),
-                (
-                    "BACKGROUND",
-                    (0, 0),
-                    (0, -1),
-                    colors.HexColor("#F4F7FA"),
-                ),
-            ]
-        )
+        TableStyle([
+            (
+                "BOX",
+                (0, 0),
+                (-1, -1),
+                0.5,
+                colors.HexColor("#D5DDE5"),
+            ),
+            (
+                "INNERGRID",
+                (0, 0),
+                (-1, -1),
+                0.25,
+                colors.HexColor("#E0E5EA"),
+            ),
+            (
+                "VALIGN",
+                (0, 0),
+                (-1, -1),
+                "TOP",
+            ),
+        ])
     )
 
     story.append(patient_table)
@@ -410,6 +444,8 @@ def generate_pdf_report(
     # ============================================================
     # AI SCREENING
     # ============================================================
+
+    confidence = normalize_confidence(ai_confidence)
 
     story.append(
         Paragraph(
@@ -426,12 +462,15 @@ def generate_pdf_report(
             ],
             [
                 Paragraph("<b>AI Finding</b>", body_style),
-                Paragraph(safe(ai_prediction), body_style),
+                Paragraph(
+                    safe(ai_prediction),
+                    body_style,
+                ),
             ],
             [
                 Paragraph("<b>AI Confidence</b>", body_style),
                 Paragraph(
-                    format_confidence(ai_confidence),
+                    f"{confidence:.1%}",
                     body_style,
                 ),
             ],
@@ -443,36 +482,22 @@ def generate_pdf_report(
     )
 
     ai_table.setStyle(
-        TableStyle(
-            [
-                (
-                    "BOX",
-                    (0, 0),
-                    (-1, -1),
-                    0.5,
-                    colors.HexColor("#D5DDE5"),
-                ),
-                (
-                    "INNERGRID",
-                    (0, 0),
-                    (-1, -1),
-                    0.25,
-                    colors.HexColor("#E0E5EA"),
-                ),
-                (
-                    "BACKGROUND",
-                    (0, 0),
-                    (0, -1),
-                    colors.HexColor("#F4F7FA"),
-                ),
-                (
-                    "VALIGN",
-                    (0, 0),
-                    (-1, -1),
-                    "TOP",
-                ),
-            ]
-        )
+        TableStyle([
+            (
+                "BOX",
+                (0, 0),
+                (-1, -1),
+                0.5,
+                colors.HexColor("#D5DDE5"),
+            ),
+            (
+                "INNERGRID",
+                (0, 0),
+                (-1, -1),
+                0.25,
+                colors.HexColor("#E0E5EA"),
+            ),
+        ])
     )
 
     story.append(ai_table)
@@ -480,6 +505,13 @@ def generate_pdf_report(
     # ============================================================
     # PROBABILITIES
     # ============================================================
+
+    if isinstance(probabilities, str):
+
+        try:
+            probabilities = json.loads(probabilities)
+        except Exception:
+            probabilities = {}
 
     if isinstance(probabilities, dict) and probabilities:
 
@@ -499,16 +531,7 @@ def generate_pdf_report(
 
         for name, value in probabilities.items():
 
-            try:
-                numeric_value = float(value)
-
-                if numeric_value > 1:
-                    numeric_value = numeric_value / 100
-
-                formatted_value = f"{numeric_value:.2%}"
-
-            except (TypeError, ValueError):
-                formatted_value = "N/A"
+            probability = normalize_confidence(value)
 
             probability_rows.append(
                 [
@@ -517,7 +540,7 @@ def generate_pdf_report(
                         body_style,
                     ),
                     Paragraph(
-                        formatted_value,
+                        f"{probability:.2%}",
                         body_style,
                     ),
                 ]
@@ -532,30 +555,28 @@ def generate_pdf_report(
         )
 
         probability_table.setStyle(
-            TableStyle(
-                [
-                    (
-                        "BOX",
-                        (0, 0),
-                        (-1, -1),
-                        0.5,
-                        colors.HexColor("#D5DDE5"),
-                    ),
-                    (
-                        "INNERGRID",
-                        (0, 0),
-                        (-1, -1),
-                        0.25,
-                        colors.HexColor("#E0E5EA"),
-                    ),
-                    (
-                        "BACKGROUND",
-                        (0, 0),
-                        (-1, 0),
-                        colors.HexColor("#F4F7FA"),
-                    ),
-                ]
-            )
+            TableStyle([
+                (
+                    "BOX",
+                    (0, 0),
+                    (-1, -1),
+                    0.5,
+                    colors.HexColor("#D5DDE5"),
+                ),
+                (
+                    "INNERGRID",
+                    (0, 0),
+                    (-1, -1),
+                    0.25,
+                    colors.HexColor("#E0E5EA"),
+                ),
+                (
+                    "BACKGROUND",
+                    (0, 0),
+                    (-1, 0),
+                    colors.HexColor("#F4F7FA"),
+                ),
+            ])
         )
 
         story.append(probability_table)
@@ -605,7 +626,7 @@ def generate_pdf_report(
 
     story.append(
         Paragraph(
-            safe(findings) or "Not provided.",
+            safe(findings),
             body_style,
         )
     )
@@ -619,7 +640,7 @@ def generate_pdf_report(
 
     story.append(
         Paragraph(
-            safe(impression) or "Not provided.",
+            safe(impression),
             impression_style,
         )
     )
@@ -670,7 +691,10 @@ def generate_pdf_report(
     radiologist_table = Table(
         [
             [
-                Paragraph("<b>Radiologist</b>", body_style),
+                Paragraph(
+                    "<b>Radiologist</b>",
+                    body_style,
+                ),
                 Paragraph(
                     safe(radiologist_name),
                     body_style,
@@ -687,15 +711,24 @@ def generate_pdf_report(
                 ),
             ],
             [
-                Paragraph("<b>Reviewed At</b>", body_style),
+                Paragraph(
+                    "<b>Reviewed At</b>",
+                    body_style,
+                ),
                 Paragraph(
                     safe(reviewed_at),
                     body_style,
                 ),
             ],
             [
-                Paragraph("<b>Review Status</b>", body_style),
-                Paragraph("APPROVED", body_style),
+                Paragraph(
+                    "<b>Review Status</b>",
+                    body_style,
+                ),
+                Paragraph(
+                    "APPROVED",
+                    body_style,
+                ),
             ],
         ],
         colWidths=[
@@ -705,30 +738,28 @@ def generate_pdf_report(
     )
 
     radiologist_table.setStyle(
-        TableStyle(
-            [
-                (
-                    "BOX",
-                    (0, 0),
-                    (-1, -1),
-                    0.5,
-                    colors.HexColor("#D5DDE5"),
-                ),
-                (
-                    "INNERGRID",
-                    (0, 0),
-                    (-1, -1),
-                    0.25,
-                    colors.HexColor("#E0E5EA"),
-                ),
-                (
-                    "BACKGROUND",
-                    (0, 0),
-                    (0, -1),
-                    colors.HexColor("#F4F7FA"),
-                ),
-            ]
-        )
+        TableStyle([
+            (
+                "BOX",
+                (0, 0),
+                (-1, -1),
+                0.5,
+                colors.HexColor("#D5DDE5"),
+            ),
+            (
+                "INNERGRID",
+                (0, 0),
+                (-1, -1),
+                0.25,
+                colors.HexColor("#E0E5EA"),
+            ),
+            (
+                "BACKGROUND",
+                (0, 0),
+                (0, -1),
+                colors.HexColor("#F4F7FA"),
+            ),
+        ])
     )
 
     story.append(radiologist_table)
@@ -738,7 +769,10 @@ def generate_pdf_report(
     # ============================================================
 
     story.append(
-        Spacer(1, 7 * mm)
+        Spacer(
+            1,
+            7 * mm,
+        )
     )
 
     story.append(
@@ -750,7 +784,10 @@ def generate_pdf_report(
     )
 
     story.append(
-        Spacer(1, 3 * mm)
+        Spacer(
+            1,
+            3 * mm,
+        )
     )
 
     story.append(
@@ -767,7 +804,10 @@ def generate_pdf_report(
     )
 
     story.append(
-        Spacer(1, 4 * mm)
+        Spacer(
+            1,
+            4 * mm,
+        )
     )
 
     story.append(
@@ -786,3 +826,524 @@ def generate_pdf_report(
     buffer.seek(0)
 
     return buffer, report_id
+
+
+# ################################################################
+# ################################################################
+#
+# MEDICAL REPORTS PAGE
+#
+# ################################################################
+# ################################################################
+
+
+def _get_current_user():
+    """Safely retrieve the currently authenticated Supabase user."""
+
+    try:
+
+        supabase = get_supabase()
+
+        response = (
+            supabase
+            .auth
+            .get_user()
+        )
+
+        if response and response.user:
+            return response.user
+
+    except Exception:
+        pass
+
+    return None
+
+
+# ================================================================
+# DOWNLOAD PDF FROM STORAGE
+# ================================================================
+
+def _download_report_pdf(
+    supabase,
+    pdf_path,
+):
+    if not pdf_path:
+        return None
+
+    try:
+
+        pdf_bytes = (
+            supabase
+            .storage
+            .from_("medical-reports")
+            .download(pdf_path)
+        )
+
+        return pdf_bytes
+
+    except Exception:
+        return None
+
+
+# ================================================================
+# DOWNLOAD EXAMINATION IMAGE
+# ================================================================
+
+def _download_scan_image(
+    supabase,
+    image_path,
+):
+    if not image_path:
+        return None
+
+    try:
+
+        image_bytes = (
+            supabase
+            .storage
+            .from_("mammosense-scans")
+            .download(image_path)
+        )
+
+        return image_bytes
+
+    except Exception:
+        return None
+
+
+# ================================================================
+# MEDICAL REPORTS PAGE
+# ================================================================
+
+def show_pdf_reports():
+
+    st.title("Medical Reports")
+
+    st.caption(
+        "Radiologist-approved medical reports"
+    )
+
+    # ============================================================
+    # AUTHENTICATION
+    # ============================================================
+
+    user = _get_current_user()
+
+    if user is None:
+
+        st.error(
+            "Please log in to view your reports."
+        )
+
+        return
+
+    supabase = get_supabase()
+
+    # ============================================================
+    # LOAD APPROVED REPORTS
+    # ============================================================
+
+    try:
+
+        response = (
+            supabase
+            .table("medical_reports")
+            .select(
+                "id,"
+                "report_id,"
+                "scan_id,"
+                "review_id,"
+                "user_id,"
+                "patient_id,"
+                "patient_name,"
+                "patient_state,"
+                "pdf_path,"
+                "status,"
+                "approved_at,"
+                "created_at"
+            )
+            .eq(
+                "user_id",
+                user.id,
+            )
+            .eq(
+                "status",
+                "APPROVED",
+            )
+            .order(
+                "approved_at",
+                desc=True,
+            )
+            .execute()
+        )
+
+        reports = response.data or []
+
+    except Exception as error:
+
+        st.error(
+            "Unable to load medical reports."
+        )
+
+        st.exception(error)
+
+        return
+
+    # ============================================================
+    # NO REPORTS
+    # ============================================================
+
+    if not reports:
+
+        st.info(
+            "No radiologist-approved medical reports "
+            "are available yet."
+        )
+
+        return
+
+    st.success(
+        f"{len(reports)} approved report"
+        + (
+            "s"
+            if len(reports) != 1
+            else ""
+        )
+        + " available."
+    )
+
+    # ============================================================
+    # DISPLAY REPORTS
+    # ============================================================
+
+    for report in reports:
+
+        report_database_id = report.get("id")
+
+        report_id = (
+            report.get("report_id")
+            or report_database_id
+            or "Unknown"
+        )
+
+        scan_id = report.get("scan_id")
+
+        patient_id = (
+            report.get("patient_id")
+            or "N/A"
+        )
+
+        patient_name = (
+            report.get("patient_name")
+            or "Unknown"
+        )
+
+        patient_state = (
+            report.get("patient_state")
+            or "N/A"
+        )
+
+        pdf_path = report.get("pdf_path")
+
+        approved_at = (
+            report.get("approved_at")
+            or "N/A"
+        )
+
+        review_id = (
+            report.get("review_id")
+            or "N/A"
+        )
+
+        # ========================================================
+        # LOAD ASSOCIATED SCAN
+        # ========================================================
+
+        scan = {}
+
+        if scan_id:
+
+            try:
+
+                scan_response = (
+                    supabase
+                    .table("ai_scans")
+                    .select(
+                        "id,"
+                        "user_id,"
+                        "patient_id,"
+                        "patient_name,"
+                        "patient_state,"
+                        "examination,"
+                        "model,"
+                        "prediction,"
+                        "confidence,"
+                        "probabilities,"
+                        "image_path,"
+                        "status,"
+                        "created_at"
+                    )
+                    .eq(
+                        "id",
+                        scan_id,
+                    )
+                    .limit(1)
+                    .execute()
+                )
+
+                scan_data = (
+                    scan_response.data
+                    or []
+                )
+
+                if scan_data:
+                    scan = scan_data[0]
+
+            except Exception:
+                scan = {}
+
+        # ========================================================
+        # CARD
+        # ========================================================
+
+        with st.container(border=True):
+
+            st.subheader(
+                f"Report {report_id}"
+            )
+
+            col1, col2 = st.columns(2)
+
+            # ----------------------------------------------------
+            # LEFT
+            # ----------------------------------------------------
+
+            with col1:
+
+                st.markdown(
+                    f"**Patient:** {patient_name}"
+                )
+
+                st.markdown(
+                    f"**Patient ID:** {patient_id}"
+                )
+
+                st.markdown(
+                    f"**State:** {patient_state}"
+                )
+
+                st.markdown(
+                    "**Examination:** "
+                    f"{scan.get('examination', 'N/A')}"
+                )
+
+            # ----------------------------------------------------
+            # RIGHT
+            # ----------------------------------------------------
+
+            with col2:
+
+                st.markdown(
+                    f"**Report ID:** {report_id}"
+                )
+
+                st.markdown(
+                    f"**Review ID:** {review_id}"
+                )
+
+                st.markdown(
+                    f"**Approved:** {approved_at}"
+                )
+
+                st.markdown(
+                    "**Status:** APPROVED"
+                )
+
+            # ====================================================
+            # SCAN INFORMATION
+            # ====================================================
+
+            if scan:
+
+                st.divider()
+
+                st.markdown(
+                    "### Examination"
+                )
+
+                c1, c2, c3 = st.columns(3)
+
+                with c1:
+
+                    st.write(
+                        "**AI Finding:** "
+                        f"{scan.get('prediction', 'N/A')}"
+                    )
+
+                with c2:
+
+                    raw_confidence = scan.get(
+                        "confidence"
+                    )
+
+                    if raw_confidence is not None:
+
+                        confidence = (
+                            normalize_confidence(
+                                raw_confidence
+                            )
+                        )
+
+                        st.write(
+                            "**AI Confidence:** "
+                            f"{confidence:.1%}"
+                        )
+
+                    else:
+
+                        st.write(
+                            "**AI Confidence:** N/A"
+                        )
+
+                with c3:
+
+                    st.write(
+                        "**Model:** "
+                        f"{scan.get('model', 'N/A')}"
+                    )
+
+                # =================================================
+                # PROBABILITIES
+                # =================================================
+
+                probabilities = scan.get(
+                    "probabilities",
+                    {},
+                )
+
+                if isinstance(
+                    probabilities,
+                    str,
+                ):
+
+                    try:
+                        probabilities = json.loads(
+                            probabilities
+                        )
+                    except Exception:
+                        probabilities = {}
+
+                if (
+                    isinstance(
+                        probabilities,
+                        dict,
+                    )
+                    and probabilities
+                ):
+
+                    with st.expander(
+                        "AI Probability Distribution"
+                    ):
+
+                        for (
+                            label,
+                            value,
+                        ) in probabilities.items():
+
+                            probability = (
+                                normalize_confidence(
+                                    value
+                                )
+                            )
+
+                            st.write(
+                                f"**{label}:** "
+                                f"{probability:.2%}"
+                            )
+
+                            st.progress(
+                                probability
+                            )
+
+                # =================================================
+                # ORIGINAL IMAGE
+                # =================================================
+
+                image_path = scan.get(
+                    "image_path"
+                )
+
+                if image_path:
+
+                    image_bytes = (
+                        _download_scan_image(
+                            supabase,
+                            image_path,
+                        )
+                    )
+
+                    if image_bytes:
+
+                        st.image(
+                            image_bytes,
+                            caption=(
+                                scan.get(
+                                    "examination",
+                                    "Examination Image",
+                                )
+                            ),
+                            use_container_width=True,
+                        )
+
+                    else:
+
+                        st.warning(
+                            "The examination image "
+                            "could not be loaded."
+                        )
+
+            # ====================================================
+            # FINAL PDF
+            # ====================================================
+
+            st.divider()
+
+            if not pdf_path:
+
+                st.warning(
+                    "This report is approved, but "
+                    "its PDF file has not been stored yet."
+                )
+
+                continue
+
+            pdf_bytes = _download_report_pdf(
+                supabase,
+                pdf_path,
+            )
+
+            if not pdf_bytes:
+
+                st.error(
+                    "The report exists, but its PDF "
+                    "could not be loaded from storage."
+                )
+
+                continue
+
+            st.success(
+                "Radiologist-approved report available."
+            )
+
+            st.download_button(
+                label="Download Final Medical Report",
+                data=pdf_bytes,
+                file_name=f"{report_id}.pdf",
+                mime="application/pdf",
+                type="primary",
+                use_container_width=True,
+                key=(
+                    f"download_report_"
+                    f"{report_database_id}"
+                ),
+            )
