@@ -3,18 +3,19 @@
 # MAIN APPLICATION
 # ============================================================
 
+import importlib
+
 import streamlit as st
 
 from ui.styles import load_styles
 
-from ui.home import show_home
 from ui.dashboard import show_dashboard
 from ui.detection import show_detection
 from ui.health import show_health
 from ui.marketplace import show_marketplace
 from ui.profile import show_profile
 from ui.radiologist import show_radiologist
-from ui.dietitian import show_dietitian
+
 from reports.pdf_report import show_pdf_reports
 
 from ui.auth import (
@@ -80,7 +81,10 @@ try:
 except Exception as error:
 
     st.error("Unable to connect to the database.")
-    st.exception(error)
+
+    with st.expander("Database error details"):
+        st.exception(error)
+
     st.stop()
 
 
@@ -130,6 +134,7 @@ if st.session_state.authenticated:
 
         current_user = None
         is_radiologist = False
+
         st.session_state.authenticated = False
 
 
@@ -151,6 +156,7 @@ if not st.session_state.authenticated:
         ):
 
             st.session_state.auth_step = "login"
+
             st.rerun()
 
     elif st.session_state.auth_step == "verify":
@@ -165,6 +171,7 @@ if not st.session_state.authenticated:
         ):
 
             st.session_state.auth_step = "login"
+
             st.rerun()
 
     else:
@@ -179,6 +186,7 @@ if not st.session_state.authenticated:
         ):
 
             st.session_state.auth_step = "register"
+
             st.rerun()
 
     st.stop()
@@ -205,9 +213,9 @@ patient_pages = [
     "Examinations",
     "Reports",
     "Health",
+    "Dietitian",
     "Marketplace",
     "Profile",
-    "Nutrition",
 ]
 
 
@@ -219,10 +227,10 @@ if is_radiologist:
         "Examinations",
         "Reports",
         "Health",
+        "Dietitian",
         "Marketplace",
         "Profile",
         "Radiologist",
-        "Nutrition",
     ]
 
 else:
@@ -238,6 +246,7 @@ current_page = st.session_state.get(
     "page",
     "Dashboard",
 )
+
 
 if current_page not in pages:
 
@@ -279,22 +288,86 @@ elif selected_page == "Examinations":
         "on the Dashboard."
     )
 
+
 elif selected_page == "Reports":
+
     show_pdf_reports()
-
-    # IMPORTANT:
-    # Reports are loaded from reports/pdf_report.py
-    # There is NO pdf_reports_page.py import.
-
 
 
 elif selected_page == "Health":
 
     show_health()
-    
-elif selected_page == "Nutrition":
 
-    show_dietitian()
+
+# ============================================================
+# DIETITIAN
+# ============================================================
+#
+# IMPORTANT:
+# The Dietitian module is imported only when this page
+# is actually opened.
+#
+# This prevents a problem inside ui/dietitian.py from
+# crashing the entire Medusa application.
+#
+# ============================================================
+
+elif selected_page == "Dietitian":
+
+    try:
+
+        dietitian_module = importlib.import_module(
+            "ui.dietitian"
+        )
+
+        show_dietitian = getattr(
+            dietitian_module,
+            "show_dietitian",
+        )
+
+        show_dietitian()
+
+    except ModuleNotFoundError as error:
+
+        st.error(
+            "The Dietitian module has not been created yet."
+        )
+
+        st.info(
+            "Create the file: ui/dietitian.py"
+        )
+
+        with st.expander("Technical details"):
+
+            st.exception(error)
+
+
+    except SyntaxError as error:
+
+        st.error(
+            "There is a syntax error inside "
+            "`ui/dietitian.py`."
+        )
+
+        st.warning(
+            "Medusa itself is running correctly. "
+            "The problem is inside the Dietitian module."
+        )
+
+        with st.expander("Syntax error details"):
+
+            st.exception(error)
+
+
+    except Exception as error:
+
+        st.error(
+            "The Dietitian module could not be loaded."
+        )
+
+        with st.expander("Technical details"):
+
+            st.exception(error)
 
 
 elif selected_page == "Marketplace":
