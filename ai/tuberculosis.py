@@ -1,35 +1,38 @@
 # ================================================================
-# MEDUSA AI
-# TUBERCULOSIS DETECTION MODEL
+# MEDUSA AI - MAMMOSENSE TB V12
+# TB DETECTION IN CHEST X-RAY
 #
-# Hugging Face:
-# Makky07/Tuberculosis
-#
-# Model:
-# MammoSense TB V12
-#
-# Architecture:
-# 3D ResNet-18
+# EXACT INFERENCE ARCHITECTURE USED DURING TRAINING
 #
 # Input:
-# 1 x 16 x 224 x 224
+#   2D Chest X-ray
+#       ↓
+#   grayscale
+#       ↓
+#   resize 224 x 224
+#       ↓
+#   pseudo-3D stacking
+#       ↓
+#   [1, D, 224, 224]
+#       ↓
+#   Custom 3D ResNet-18
+#       ↓
+#   TB probability
 #
-# Classes:
-# NON_TB
-# TB
-#
-# The original 2D chest X-ray is converted to grayscale,
-# resized to 224x224, normalized, then replicated 16 times
-# along the depth dimension.
+# IMPORTANT:
+# DO NOT replace this architecture with torchvision VideoResNet.
 # ================================================================
 
 import io
+import os
+import json
+import hashlib
+import logging
 
+import numpy as np
 import torch
 import torch.nn as nn
 from PIL import Image
-from torchvision.models.video import r3d_18
-from torchvision.transforms import Compose, Resize, ToTensor, Normalize
 from huggingface_hub import hf_hub_download
 
 
@@ -37,171 +40,353 @@ from huggingface_hub import hf_hub_download
 # CONFIGURATION
 # ================================================================
 
-REPO_ID = "Makky07/Tuberculosis"
+HF_REPO = "Makky07/Tuberculosis"
 
+# CHANGE THIS ONLY IF YOUR FILE HAS A DIFFERENT NAME
 MODEL_FILENAME = "mammosense_tb_v12.pt"
 
 IMAGE_SIZE = 224
-DEPTH = 16
 
-THRESHOLD = 0.50
-
-CLASS_NAMES = [
-    "NON_TB",
-    "TB",
-]
-
-
-# ================================================================
-# DEVICE
-# ================================================================
+# This must match the depth used by the V12 training pipeline.
+# If your metadata.json contains another value, the loader below
+# automatically uses that value.
+DEFAULT_DEPTH = 16
 
 DEVICE = torch.device(
-    "cuda"
-    if torch.cuda.is_available()
-    else "cpu"
+    "cuda" if torch.cuda.is_available() else "cpu"
 )
+
+logger = logging.getLogger(__name__)
 
 
 # ================================================================
-# GLOBAL MODEL
+# EXACT CUSTOM 3D RESNET BLOCK
+# ================================================================
+
+class BasicBlock3D(nn.Module):
+
+    expansion = 1
+
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        stride=1
+    ):
+        super().__init__()
+
+        self.conv1 = nn.Conv3d(
+            in_channels,
+            out_channels,
+            kernel_size=3,
+            stride=stride,
+            padding=1,
+            bias=False
+        )
+
+        self.bn1 = nn.BatchNorm3d(out_channels)
+
+        self.conv2 = nn.Conv3d(
+            out_channels,
+            out_channels,
+            kernel_size=3,
+            stride=1,
+            padding=1,
+            bias=False
+        )
+
+        self.bn2 = nn.BatchNorm3d(out_channels)
+
+        if stride != 1 or in_channels != out_channels:
+
+            self.shortcut = nn.Sequential(
+                nn.Conv3d(
+                    in_channels,
+                    out_channels,
+                    kernel_size=1,
+                    stride=stride,
+                    bias=False
+                ),
+                nn.BatchNorm3d(out_channels)
+            )
+
+        else:
+
+            self.shortcut = nn.Identity()
+
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, x):
+
+        identity = self.shortcut(x)
+
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+
+        out = self.conv2(out)
+        out = self.bn2(out)
+
+        out = out + identity
+        out = self.relu(out)
+
+        return out
+
+
+# ================================================================
+# EXACT MAMMOSENSE 3D RESNET-18
+# ================================================================
+
+class MammoSenseTBResNet18(nn.Module):
+
+    def __init__(self, num_classes=1):
+
+        super().__init__()
+
+        # IMPORTANT:
+        # This is 7 x 7 x 7.
+        # The error from Medusa showed that the current loader
+        # was incorrectly using 3 x 7 x 7.
+
+        self.stem = nn.Sequential(
+
+            nn.Conv3d(
+                1,
+                64,
+                kernel_size=7,
+                stride=2,
+                padding=3,
+                bias=False
+            ),
+
+            nn.BatchNorm3d(64),
+
+            nn.ReLU(inplace=True),
+
+            nn.MaxPool3d(
+                kernel_size=3,
+                stride=2,
+                padding=1
+            )
+        )
+
+        self.layer1 = self._make_layer(
+            64,
+            64,
+            blocks=2,
+            stride=1
+        )
+
+        self.layer2 = self._make_layer(
+            64,
+            128,
+            blocks=2,
+            stride=2
+        )
+
+        self.layer3 = self._make_layer(
+            128,
+            256,
+            blocks=2,
+            stride=2
+        )
+
+        self.layer4 = self._make_layer(
+            256,
+            512,
+            blocks=2,
+            stride=2
+        )
+
+        self.avgpool = nn.AdaptiveAvgPool3d(
+            (1, 1, 1)
+        )
+
+        # Binary classifier.
+        # V12 was trained with ONE output logit.
+        self.fc = nn.Linear(
+            512,
+            1
+        )
+
+    def _make_layer(
+        self,
+        in_channels,
+        out_channels,
+        blocks,
+        stride
+    ):
+
+        layers = []
+
+        layers.append(
+            BasicBlock3D(
+                in_channels,
+                out_channels,
+                stride
+            )
+        )
+
+        for _ in range(1, blocks):
+
+            layers.append(
+                BasicBlock3D(
+                    out_channels,
+                    out_channels,
+                    stride=1
+                )
+            )
+
+        return nn.Sequential(*layers)
+
+    def forward(self, x):
+
+        x = self.stem(x)
+
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.layer4(x)
+
+        x = self.avgpool(x)
+
+        x = torch.flatten(
+            x,
+            start_dim=1
+        )
+
+        x = self.fc(x)
+
+        return x
+
+
+# ================================================================
+# GLOBAL MODEL CACHE
 # ================================================================
 
 _MODEL = None
+_MODEL_METADATA = None
+_MODEL_PATH = None
 
 
 # ================================================================
-# IMAGE PREPROCESSING
+# SHA256
 # ================================================================
 
-TRANSFORM = Compose(
-    [
-        Resize(
-            (IMAGE_SIZE, IMAGE_SIZE)
-        ),
+def sha256_file(path):
 
-        ToTensor(),
+    h = hashlib.sha256()
 
-        Normalize(
-            mean=[0.485],
-            std=[0.229],
-        ),
-    ]
-)
+    with open(path, "rb") as f:
+
+        while True:
+
+            chunk = f.read(1024 * 1024)
+
+            if not chunk:
+                break
+
+            h.update(chunk)
+
+    return h.hexdigest()
 
 
 # ================================================================
-# MODEL ARCHITECTURE
+# FIND MODEL FILE
 # ================================================================
 
-def create_model():
+def _download_model():
 
-    model = r3d_18(
-        weights=None,
+    global _MODEL_PATH
+
+    if _MODEL_PATH is not None:
+        return _MODEL_PATH
+
+    logger.info(
+        "Downloading MammoSense TB V12 model..."
     )
 
-    # ------------------------------------------------------------
-    # Original R3D-18 expects RGB input.
-    #
-    # The TB model expects one grayscale channel.
-    # ------------------------------------------------------------
-
-    original_conv = model.stem[0]
-
-    model.stem[0] = nn.Conv3d(
-        in_channels=1,
-        out_channels=original_conv.out_channels,
-        kernel_size=original_conv.kernel_size,
-        stride=original_conv.stride,
-        padding=original_conv.padding,
-        bias=False,
+    model_path = hf_hub_download(
+        repo_id=HF_REPO,
+        filename=MODEL_FILENAME
     )
 
-    # ------------------------------------------------------------
-    # Binary classification
-    # ------------------------------------------------------------
+    _MODEL_PATH = model_path
 
-    model.fc = nn.Linear(
-        model.fc.in_features,
-        1,
+    logger.info(
+        "TB model downloaded: %s",
+        model_path
     )
 
-    return model
+    return model_path
 
 
 # ================================================================
-# LOAD CHECKPOINT
+# LOAD METADATA IF AVAILABLE
+# ================================================================
+
+def _load_metadata():
+
+    try:
+
+        metadata_path = hf_hub_download(
+            repo_id=HF_REPO,
+            filename="metadata.json"
+        )
+
+        with open(
+            metadata_path,
+            "r",
+            encoding="utf-8"
+        ) as f:
+
+            return json.load(f)
+
+    except Exception:
+
+        return {}
+
+
+# ================================================================
+# EXTRACT STATE DICT
 # ================================================================
 
 def _extract_state_dict(checkpoint):
 
-    if isinstance(checkpoint, dict):
+    if isinstance(
+        checkpoint,
+        dict
+    ):
 
-        # Expected format from metadata.json
+        # Standard V12 checkpoint
         if "model_state_dict" in checkpoint:
 
             return checkpoint["model_state_dict"]
 
-        # Common alternatives
+        # Other common naming
         if "state_dict" in checkpoint:
 
             return checkpoint["state_dict"]
 
-        if "model" in checkpoint:
-
-            model_value = checkpoint["model"]
-
-            if isinstance(model_value, dict):
-
-                return model_value
-
-    # Raw state_dict
-    if isinstance(checkpoint, dict):
-
-        tensor_values = [
-            value
-            for value in checkpoint.values()
-            if torch.is_tensor(value)
-        ]
-
-        if tensor_values:
-
-            return checkpoint
-
-    raise RuntimeError(
-        "Could not find a valid model_state_dict "
-        "inside the tuberculosis checkpoint."
-    )
-
-
-# ================================================================
-# CLEAN CHECKPOINT KEYS
-# ================================================================
-
-def _clean_state_dict(state_dict):
-
-    cleaned = {}
-
-    for key, value in state_dict.items():
-
-        new_key = key
-
-        # Remove common wrappers
-        for prefix in (
-            "module.",
-            "model.",
-            "net.",
+        # Raw state_dict
+        if all(
+            isinstance(k, str)
+            for k in checkpoint.keys()
         ):
 
-            if new_key.startswith(prefix):
+            tensor_values = [
+                v
+                for v in checkpoint.values()
+                if torch.is_tensor(v)
+            ]
 
-                new_key = new_key[
-                    len(prefix):
-                ]
+            if tensor_values:
 
-        cleaned[new_key] = value
+                return checkpoint
 
-    return cleaned
+    raise RuntimeError(
+        "Unable to find model_state_dict in checkpoint."
+    )
 
 
 # ================================================================
@@ -211,6 +396,7 @@ def _clean_state_dict(state_dict):
 def load_model():
 
     global _MODEL
+    global _MODEL_METADATA
 
     if _MODEL is not None:
 
@@ -218,37 +404,49 @@ def load_model():
 
     try:
 
-        model_path = hf_hub_download(
-            repo_id=REPO_ID,
-            filename=MODEL_FILENAME,
-        )
+        model_path = _download_model()
+
+        _MODEL_METADATA = _load_metadata()
 
         checkpoint = torch.load(
             model_path,
             map_location="cpu",
-            weights_only=False,
+            weights_only=False
         )
 
         state_dict = _extract_state_dict(
             checkpoint
         )
 
-        state_dict = _clean_state_dict(
-            state_dict
-        )
+        # Remove DataParallel prefix if present
+        cleaned_state_dict = {}
 
-        model = create_model()
+        for key, value in state_dict.items():
+
+            if key.startswith("module."):
+
+                key = key[len("module."):]
+
+            cleaned_state_dict[key] = value
+
+        state_dict = cleaned_state_dict
+
+        # --------------------------------------------------------
+        # Create EXACT training architecture
+        # --------------------------------------------------------
+
+        model = MammoSenseTBResNet18(
+            num_classes=1
+        )
 
         # --------------------------------------------------------
         # Strict loading is intentional.
-        #
-        # If the architecture/checkpoint does not match,
-        # fail loudly instead of producing unreliable predictions.
+        # It prevents silent architecture mistakes.
         # --------------------------------------------------------
 
         model.load_state_dict(
             state_dict,
-            strict=True,
+            strict=True
         )
 
         model.to(DEVICE)
@@ -257,101 +455,179 @@ def load_model():
 
         _MODEL = model
 
+        logger.info(
+            "MammoSense TB V12 loaded successfully."
+        )
+
+        logger.info(
+            "Device: %s",
+            DEVICE
+        )
+
         return _MODEL
 
     except Exception as error:
 
         raise RuntimeError(
             "Failed to load the Medusa AI tuberculosis model "
-            f"from Hugging Face ({REPO_ID}). "
+            f"from Hugging Face ({HF_REPO}). "
+            f"Checkpoint architecture does not match the "
+            f"loader or the model file is invalid. "
             f"Original error: {error}"
         ) from error
 
 
 # ================================================================
-# PREPARE IMAGE
+# IMAGE PREPROCESSING
 # ================================================================
 
-def _prepare_image(image):
+def _prepare_image(
+    image,
+    depth=DEFAULT_DEPTH
+):
 
-    if image is None:
-
-        raise ValueError(
-            "No medical image was provided."
-        )
-
-    # ------------------------------------------------------------
-    # Accept PIL Image
-    # ------------------------------------------------------------
-
-    if isinstance(image, Image.Image):
-
-        pil_image = image
-
-    # ------------------------------------------------------------
-    # Accept raw bytes
-    # ------------------------------------------------------------
-
-    elif isinstance(
+    if not isinstance(
         image,
-        (bytes, bytearray),
+        Image.Image
     ):
 
-        pil_image = Image.open(
-            io.BytesIO(image)
+        image = Image.open(
+            image
         )
+
+    # ------------------------------------------------------------
+    # Grayscale
+    # ------------------------------------------------------------
+
+    image = image.convert("L")
+
+    # ------------------------------------------------------------
+    # Resize
+    # ------------------------------------------------------------
+
+    image = image.resize(
+        (
+            IMAGE_SIZE,
+            IMAGE_SIZE
+        ),
+        Image.Resampling.BILINEAR
+    )
+
+    # ------------------------------------------------------------
+    # NumPy
+    # ------------------------------------------------------------
+
+    arr = np.asarray(
+        image,
+        dtype=np.float32
+    )
+
+    # ------------------------------------------------------------
+    # Normalize to [0, 1]
+    # ------------------------------------------------------------
+
+    arr /= 255.0
+
+    # ------------------------------------------------------------
+    # Convert to approximately standardized intensity.
+    #
+    # This should match the training preprocessing.
+    # ------------------------------------------------------------
+
+    mean = arr.mean()
+    std = arr.std()
+
+    if std > 1e-6:
+
+        arr = (
+            arr - mean
+        ) / std
 
     else:
 
-        raise TypeError(
-            "TB prediction expects a PIL Image "
-            "or image bytes."
-        )
+        arr = arr - mean
 
     # ------------------------------------------------------------
-    # Convert to grayscale
+    # Clip extreme values
     # ------------------------------------------------------------
 
-    pil_image = pil_image.convert("L")
-
-    # ------------------------------------------------------------
-    # Apply model preprocessing
-    # ------------------------------------------------------------
-
-    tensor = TRANSFORM(
-        pil_image
+    arr = np.clip(
+        arr,
+        -3.0,
+        3.0
     )
 
-    # Current shape:
+    # ------------------------------------------------------------
+    # Pseudo-3D construction
     #
-    # [1, 224, 224]
-    #
-    # Add depth dimension and replicate 16 times:
-    #
-    # [1, 16, 224, 224]
+    # The original training pipeline converted the 2D X-ray
+    # into a 3D tensor by stacking the image along depth.
     # ------------------------------------------------------------
 
-    tensor = tensor.unsqueeze(1)
-
-    tensor = tensor.repeat(
-        1,
-        DEPTH,
-        1,
-        1,
+    volume = np.stack(
+        [arr] * depth,
+        axis=0
     )
 
-    # Add batch dimension:
-    #
-    # [1, 1, 16, 224, 224]
-    # ------------------------------------------------------------
+    # [D,H,W]
+    # ->
+    # [1,D,H,W]
 
-    tensor = tensor.unsqueeze(0)
+    volume = np.expand_dims(
+        volume,
+        axis=0
+    )
+
+    # ->
+    # [B,C,D,H,W]
+
+    volume = np.expand_dims(
+        volume,
+        axis=0
+    )
+
+    tensor = torch.from_numpy(
+        volume
+    ).float()
 
     return tensor
 
 
 # ================================================================
-# PREDICTION
+# GET MODEL DEPTH
+# ================================================================
+
+def _get_depth():
+
+    metadata = _MODEL_METADATA or {}
+
+    candidates = [
+        metadata.get("input_depth"),
+        metadata.get("depth"),
+        metadata.get("volume_depth")
+    ]
+
+    for value in candidates:
+
+        if value is not None:
+
+            try:
+
+                value = int(value)
+
+                if value > 0:
+
+                    return value
+
+            except Exception:
+
+                pass
+
+    return DEFAULT_DEPTH
+
+
+# ================================================================
+# PREDICT
 # ================================================================
 
 @torch.inference_mode()
@@ -359,135 +635,103 @@ def predict(image):
 
     model = load_model()
 
+    depth = _get_depth()
+
     tensor = _prepare_image(
-        image
+        image,
+        depth=depth
     )
 
     tensor = tensor.to(
         DEVICE,
-        non_blocking=True,
+        non_blocking=True
     )
 
     logits = model(
         tensor
     )
 
-    # ------------------------------------------------------------
-    # The model is binary.
-    #
-    # Output:
-    # [batch, 1]
-    #
-    # Convert logit to TB probability.
-    # ------------------------------------------------------------
-
-    if isinstance(
-        logits,
-        tuple,
-    ):
-
-        logits = logits[0]
-
-    if isinstance(
-        logits,
-        dict,
-    ):
-
-        if "logits" in logits:
-
-            logits = logits["logits"]
-
-        else:
-
-            raise RuntimeError(
-                "Unexpected dictionary output "
-                "from tuberculosis model."
-            )
-
-    logits = logits.reshape(-1)
-
-    tb_probability = torch.sigmoid(
-        logits[0]
+    probability = torch.sigmoid(
+        logits
     ).item()
 
+    # ------------------------------------------------------------
+    # Binary convention used during V12:
+    #
+    # 0 = NON_TB
+    # 1 = TB
+    # ------------------------------------------------------------
+
     tb_probability = float(
-        max(
-            0.0,
-            min(
-                1.0,
-                tb_probability,
-            ),
-        )
+        probability
     )
 
-    non_tb_probability = (
-        1.0 - tb_probability
+    non_tb_probability = float(
+        1.0 - probability
     )
 
-    # ------------------------------------------------------------
-    # Classification
-    # ------------------------------------------------------------
+    if tb_probability >= 0.5:
 
-    if tb_probability >= THRESHOLD:
-
-        prediction = "TB"
-
-        confidence = tb_probability
+        predicted_class = "TB"
 
     else:
 
-        prediction = "NON_TB"
-
-        confidence = non_tb_probability
-
-    # ------------------------------------------------------------
-    # Return format matches your detection.py
-    # ------------------------------------------------------------
+        predicted_class = "NON_TB"
 
     return {
-        "prediction": prediction,
+        "prediction": predicted_class,
 
-        "confidence": float(
-            confidence
+        "predicted_class": predicted_class,
+
+        "tb_probability": tb_probability,
+
+        "non_tb_probability": non_tb_probability,
+
+        "confidence": max(
+            tb_probability,
+            non_tb_probability
         ),
 
-        "probabilities": {
-            "NON_TB": float(
-                non_tb_probability
-            ),
+        "model": "MammoSense TB V12",
 
-            "TB": float(
-                tb_probability
-            ),
-        },
-    }
-
-
-# ================================================================
-# OPTIONAL MODEL INFORMATION
-# ================================================================
-
-def model_info():
-
-    return {
-        "model_name": "MammoSense TB V12",
-
-        "repository": REPO_ID,
-
-        "checkpoint": MODEL_FILENAME,
-
-        "architecture": "3D ResNet-18",
-
-        "input_shape": (
-            1,
-            DEPTH,
-            IMAGE_SIZE,
-            IMAGE_SIZE,
+        "architecture": (
+            "Custom 3D ResNet-18"
         ),
-
-        "classes": CLASS_NAMES,
-
-        "threshold": THRESHOLD,
 
         "device": str(DEVICE),
+
+        "input_depth": depth,
+
+        "image_size": IMAGE_SIZE
     }
+
+
+# ================================================================
+# COMPATIBILITY FUNCTION
+# ================================================================
+
+def analyze_image(image):
+
+    return predict(
+        image
+    )
+
+
+# ================================================================
+# OPTIONAL ALIASES
+# ================================================================
+
+def predict_tb(image):
+
+    return predict(
+        image
+    )
+
+
+__all__ = [
+    "load_model",
+    "predict",
+    "predict_tb",
+    "analyze_image",
+    "MammoSenseTBResNet18",
+]
