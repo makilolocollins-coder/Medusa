@@ -15,9 +15,7 @@ from ui.marketplace import show_marketplace
 from ui.profile import show_profile
 from ui.radiologist import show_radiologist
 
-# IMPORTANT:
-# This is the REPORT PAGE, not the PDF generator.
-from reports.pdf_reports_page import show_pdf_reports
+from reports.pdf_report import show_pdf_reports
 
 from ui.auth import (
     show_auth,
@@ -64,6 +62,7 @@ defaults = {
     "prediction": None,
 }
 
+
 for key, value in defaults.items():
 
     if key not in st.session_state:
@@ -85,27 +84,23 @@ except Exception as error:
     st.stop()
 
 
+# ============================================================
+# AUTHENTICATION STATE
+# ============================================================
+
 current_user = None
 is_radiologist = False
 
-
-# ============================================================
-# CHECK AUTHENTICATION
-# ============================================================
 
 if st.session_state.authenticated:
 
     try:
 
-        response = supabase.auth.get_user()
+        auth_response = supabase.auth.get_user()
 
-        if response and response.user:
+        if auth_response and auth_response.user:
 
-            current_user = response.user
-
-            # ------------------------------------------------
-            # VERIFY RADIOLOGIST
-            # ------------------------------------------------
+            current_user = auth_response.user
 
             doctor_response = (
                 supabase
@@ -123,11 +118,7 @@ if st.session_state.authenticated:
                 .execute()
             )
 
-            doctors = (
-                doctor_response.data
-                if doctor_response
-                else []
-            )
+            doctors = doctor_response.data or []
 
             is_radiologist = bool(doctors)
 
@@ -139,6 +130,7 @@ if st.session_state.authenticated:
 
         current_user = None
         is_radiologist = False
+        st.session_state.authenticated = False
 
 
 # ============================================================
@@ -146,10 +138,6 @@ if st.session_state.authenticated:
 # ============================================================
 
 if not st.session_state.authenticated:
-
-    # --------------------------------------------------------
-    # REGISTER
-    # --------------------------------------------------------
 
     if st.session_state.auth_step == "register":
 
@@ -163,12 +151,7 @@ if not st.session_state.authenticated:
         ):
 
             st.session_state.auth_step = "login"
-
             st.rerun()
-
-    # --------------------------------------------------------
-    # VERIFICATION
-    # --------------------------------------------------------
 
     elif st.session_state.auth_step == "verify":
 
@@ -182,12 +165,7 @@ if not st.session_state.authenticated:
         ):
 
             st.session_state.auth_step = "login"
-
             st.rerun()
-
-    # --------------------------------------------------------
-    # LOGIN
-    # --------------------------------------------------------
 
     else:
 
@@ -201,7 +179,6 @@ if not st.session_state.authenticated:
         ):
 
             st.session_state.auth_step = "register"
-
             st.rerun()
 
     st.stop()
@@ -219,7 +196,7 @@ st.caption(
 
 
 # ============================================================
-# PATIENT NAVIGATION
+# NAVIGATION
 # ============================================================
 
 patient_pages = [
@@ -232,10 +209,6 @@ patient_pages = [
     "Profile",
 ]
 
-
-# ============================================================
-# RADIOLOGIST NAVIGATION
-# ============================================================
 
 if is_radiologist:
 
@@ -256,7 +229,7 @@ else:
 
 
 # ============================================================
-# NAVIGATION
+# NAVIGATION SELECTOR
 # ============================================================
 
 current_page = st.session_state.get(
@@ -268,6 +241,7 @@ if current_page not in pages:
 
     current_page = "Dashboard"
 
+
 selected_page = st.radio(
     "Main navigation",
     pages,
@@ -275,6 +249,7 @@ selected_page = st.radio(
     horizontal=True,
     label_visibility="collapsed",
 )
+
 
 st.session_state.page = selected_page
 
@@ -305,16 +280,9 @@ elif selected_page == "Examinations":
 
 elif selected_page == "Reports":
 
-    # ========================================================
-    # IMPORTANT
-    # This is the actual Medical Reports page.
-    #
-    # It loads:
-    # reports/pdf_reports_page.py
-    #
-    # which contains:
-    # show_pdf_reports()
-    # ========================================================
+    # IMPORTANT:
+    # Reports are loaded from reports/pdf_report.py
+    # There is NO pdf_reports_page.py import.
 
     show_pdf_reports()
 
