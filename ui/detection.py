@@ -18,40 +18,75 @@ from ai.pneumonia import (
     predict as predict_pneumonia,
 )
 
-from reports.pdf_report import generate_pdf_report
 
+# ============================================================
+# NIGERIAN STATES
+# ============================================================
 
 NIGERIAN_STATES = [
-    "Abia", "Adamawa", "Akwa Ibom", "Anambra",
-    "Bauchi", "Bayelsa", "Benue", "Borno",
-    "Cross River", "Delta", "Ebonyi", "Edo",
-    "Ekiti", "Enugu", "Gombe", "Imo",
-    "Jigawa", "Kaduna", "Kano", "Katsina",
-    "Kebbi", "Kogi", "Kwara", "Lagos",
-    "Nasarawa", "Niger", "Ogun", "Ondo",
-    "Osun", "Oyo", "Plateau", "Rivers",
-    "Sokoto", "Taraba", "Yobe", "Zamfara",
+    "Abia",
+    "Adamawa",
+    "Akwa Ibom",
+    "Anambra",
+    "Bauchi",
+    "Bayelsa",
+    "Benue",
+    "Borno",
+    "Cross River",
+    "Delta",
+    "Ebonyi",
+    "Edo",
+    "Ekiti",
+    "Enugu",
+    "Gombe",
+    "Imo",
+    "Jigawa",
+    "Kaduna",
+    "Kano",
+    "Katsina",
+    "Kebbi",
+    "Kogi",
+    "Kwara",
+    "Lagos",
+    "Nasarawa",
+    "Niger",
+    "Ogun",
+    "Ondo",
+    "Osun",
+    "Oyo",
+    "Plateau",
+    "Rivers",
+    "Sokoto",
+    "Taraba",
+    "Yobe",
+    "Zamfara",
     "FCT",
 ]
 
 
+# ============================================================
+# SESSION STATE
+# ============================================================
+
 def initialize_state():
 
     defaults = {
-        "patient_id": None,
-        "patient_name": "",
-        "patient_state": "Delta",
-        "scan_id": None,
-        "scan_model": None,
-        "scan_type": None,
-        "scan_result": None,
-        "scan_image_bytes": None,
-        "scan_filename": None,
-        "review_status": "NOT_REQUESTED",
-        "review_id": None,
-        "report_pdf": None,
-        "report_id": None,
-        "report_downloadable": False,
+        "medusa_patient_id": None,
+        "medusa_patient_name": "",
+        "medusa_patient_state": "Delta",
+
+        "medusa_scan_id": None,
+        "medusa_scan_result": None,
+        "medusa_scan_model": None,
+        "medusa_scan_type": None,
+        "medusa_scan_image": None,
+        "medusa_scan_filename": None,
+
+        "medusa_review_status": "NOT_REQUESTED",
+        "medusa_review_id": None,
+
+        "medusa_report_id": None,
+        "medusa_report_path": None,
     }
 
     for key, value in defaults.items():
@@ -59,6 +94,10 @@ def initialize_state():
         if key not in st.session_state:
             st.session_state[key] = value
 
+
+# ============================================================
+# PATIENT ID
+# ============================================================
 
 def generate_patient_id():
 
@@ -69,6 +108,10 @@ def generate_patient_id():
         + uuid.uuid4().hex[:8].upper()
     )
 
+
+# ============================================================
+# CURRENT USER
+# ============================================================
 
 def get_current_user():
 
@@ -81,47 +124,77 @@ def get_current_user():
             return response.user
 
     except Exception:
-        pass
+        return None
 
     return None
 
 
+# ============================================================
+# RESET EXAMINATION
+# ============================================================
+
 def reset_examination():
 
-    keys = [
-        "scan_id",
-        "scan_model",
-        "scan_type",
-        "scan_result",
-        "scan_image_bytes",
-        "scan_filename",
-        "review_id",
-        "report_pdf",
-        "report_id",
-    ]
+    st.session_state.medusa_scan_id = None
+    st.session_state.medusa_scan_result = None
+    st.session_state.medusa_scan_model = None
+    st.session_state.medusa_scan_type = None
+    st.session_state.medusa_scan_image = None
+    st.session_state.medusa_scan_filename = None
 
-    for key in keys:
-        st.session_state[key] = None
+    st.session_state.medusa_review_status = "NOT_REQUESTED"
+    st.session_state.medusa_review_id = None
 
-    st.session_state.review_status = "NOT_REQUESTED"
-    st.session_state.report_downloadable = False
+    st.session_state.medusa_report_id = None
+    st.session_state.medusa_report_path = None
 
 
-def load_latest_review_status():
+# ============================================================
+# GET REVIEW STATUS
+# ============================================================
 
-    scan_id = st.session_state.get("scan_id")
+def get_review_status(scan_id):
 
     if not scan_id:
-        return
+        return "NOT_REQUESTED", None
 
     try:
 
         supabase = get_supabase()
 
+        reviews = (
+            supabase
+            .table("radiologist_reviews")
+            .select("id,status,approved")
+            .eq("scan_id", scan_id)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+            .data
+            or []
+        )
+
+        if reviews:
+
+            review = reviews[0]
+
+            status = str(
+                review.get("status", "")
+            ).upper()
+
+            approved = review.get(
+                "approved",
+                False,
+            )
+
+            if status == "APPROVED" or approved is True:
+
+                return "APPROVED", review.get("id")
+
         requests = (
             supabase
             .table("radiologist_requests")
-            .select("*")
+            .select("id,status")
             .eq("scan_id", scan_id)
             .order("created_at", desc=True)
             .limit(1)
@@ -135,8 +208,15 @@ def load_latest_review_status():
             request = requests[0]
 
             request_status = str(
-                request.get("status", "PENDING")
+                request.get("status", "")
             ).upper()
+
+            if request_status in (
+                "PENDING",
+                "REQUESTED",
+            ):
+
+                return "PENDING", None
 
             if request_status in (
                 "APPROVED",
@@ -144,53 +224,66 @@ def load_latest_review_status():
                 "REVIEWED",
             ):
 
-                st.session_state.review_status = "APPROVED"
+                return "APPROVED", None
 
-            elif request_status in (
-                "PENDING",
-                "REQUESTED",
-            ):
+        return "NOT_REQUESTED", None
 
-                st.session_state.review_status = "PENDING"
+    except Exception:
+        return (
+            st.session_state.medusa_review_status,
+            st.session_state.medusa_review_id,
+        )
 
-            else:
 
-                st.session_state.review_status = (
-                    request_status
-                )
+# ============================================================
+# GET APPROVED REPORT
+# ============================================================
 
-        reviews = (
+def get_approved_report(scan_id):
+
+    if not scan_id:
+        return None
+
+    try:
+
+        supabase = get_supabase()
+
+        reports = (
             supabase
-            .table("radiologist_reviews")
-            .select("*")
-            .eq("scan_id", scan_id)
-            .order("created_at", desc=True)
+            .table("medical_reports")
+            .select(
+                "report_id,pdf_path,status,approved_at"
+            )
+            .eq(
+                "scan_id",
+                scan_id,
+            )
+            .eq(
+                "status",
+                "APPROVED",
+            )
+            .order(
+                "approved_at",
+                desc=True,
+            )
             .limit(1)
             .execute()
             .data
             or []
         )
 
-        if reviews:
-
-            review = reviews[0]
-
-            st.session_state.review_id = review.get("id")
-
-            review_status = str(
-                review.get("status", "")
-            ).upper()
-
-            if (
-                review_status == "APPROVED"
-                or review.get("approved") is True
-            ):
-
-                st.session_state.review_status = "APPROVED"
+        if reports:
+            return reports[0]
 
     except Exception:
         pass
 
+    return None
+
+
+# ============================================================
+# SHOW DETECTION
+# ============================================================
 
 def show_detection():
 
@@ -204,84 +297,87 @@ def show_detection():
         "AI-assisted medical imaging and radiologist review"
     )
 
-    # ============================================================
-# PATIENT REGISTRATION
-# ============================================================
+    # ========================================================
+    # PATIENT REGISTRATION
+    # ========================================================
 
-st.subheader("Patient Registration")
-
-col1, col2 = st.columns(2)
-
-with col1:
+    st.subheader("Patient Registration")
 
     patient_name = st.text_input(
         "Patient full name",
-        value=st.session_state.patient_name,
+        value=st.session_state.medusa_patient_name,
         placeholder="Enter patient's full name",
-        key="patient_name_input",
+        key="medusa_patient_name_widget",
     )
 
-with col2:
+    state_index = 0
+
+    if (
+        st.session_state.medusa_patient_state
+        in NIGERIAN_STATES
+    ):
+
+        state_index = NIGERIAN_STATES.index(
+            st.session_state.medusa_patient_state
+        )
 
     patient_state = st.selectbox(
         "State",
         NIGERIAN_STATES,
-        index=(
-            NIGERIAN_STATES.index(
-                st.session_state.patient_state
-            )
-            if st.session_state.patient_state
-            in NIGERIAN_STATES
-            else 0
-        ),
-        key="patient_state",
+        index=state_index,
+        key="medusa_patient_state_widget",
     )
 
-patient_name = patient_name.strip()
+    patient_name = patient_name.strip()
 
-if patient_name:
+    # Store values in our OWN session keys.
+    # The widget keys are deliberately different.
 
-    st.session_state.patient_name = patient_name
+    st.session_state.medusa_patient_name = patient_name
+    st.session_state.medusa_patient_state = patient_state
 
-    if not st.session_state.patient_id:
+    if patient_name and not st.session_state.medusa_patient_id:
 
-        st.session_state.patient_id = (
+        st.session_state.medusa_patient_id = (
             generate_patient_id()
         )
 
-if st.session_state.patient_id:
+    if st.session_state.medusa_patient_id:
 
-    st.info(
-        f"Patient ID: {st.session_state.patient_id}"
-    )
+        st.info(
+            f"Patient ID: "
+            f"{st.session_state.medusa_patient_id}"
+        )
 
-    # ============================================================
+    # ========================================================
     # NEW EXAMINATION
-    # ============================================================
+    # ========================================================
 
-    if st.session_state.scan_result is not None:
+    if st.session_state.medusa_scan_result is not None:
 
         if st.button(
             "Start New Examination",
             use_container_width=True,
+            key="medusa_new_examination",
         ):
 
             reset_examination()
+
             st.rerun()
 
-    # ============================================================
-    # MODEL
-    # ============================================================
+    # ========================================================
+    # EXAMINATION TYPE
+    # ========================================================
 
     st.subheader("Examination")
 
     model_choice = st.selectbox(
-        "AI model",
+        "Select AI model",
         [
             "MammoSense — Breast Ultrasound",
             "MammoSense Pneumonia — Chest X-ray",
         ],
-        key="medical_model",
+        key="medusa_model_choice",
     )
 
     is_pneumonia = (
@@ -309,9 +405,9 @@ if st.session_state.patient_id:
             "AI-assisted screening."
         )
 
-    # ============================================================
-    # IMAGE
-    # ============================================================
+    # ========================================================
+    # IMAGE UPLOAD
+    # ========================================================
 
     uploaded = st.file_uploader(
         "Upload medical image",
@@ -321,20 +417,20 @@ if st.session_state.patient_id:
             "png",
             "webp",
         ],
-        key="medical_scan_upload",
+        key="medusa_medical_upload",
     )
 
     if uploaded is not None:
 
         image_bytes = uploaded.getvalue()
 
-        st.session_state.scan_image_bytes = image_bytes
-        st.session_state.scan_filename = uploaded.name
+        st.session_state.medusa_scan_image = image_bytes
+        st.session_state.medusa_scan_filename = uploaded.name
 
     else:
 
         image_bytes = (
-            st.session_state.scan_image_bytes
+            st.session_state.medusa_scan_image
         )
 
     if not image_bytes:
@@ -345,17 +441,15 @@ if st.session_state.patient_id:
 
         return
 
+    # ========================================================
+    # OPEN IMAGE
+    # ========================================================
+
     try:
 
         image = Image.open(
             io.BytesIO(image_bytes)
         ).convert("RGB")
-
-        st.image(
-            image,
-            caption=examination,
-            use_container_width=True,
-        )
 
     except Exception:
 
@@ -365,21 +459,38 @@ if st.session_state.patient_id:
 
         return
 
-    # ============================================================
+    st.image(
+        image,
+        caption=examination,
+        use_container_width=True,
+    )
+
+    # ========================================================
     # ANALYZE
-    # ============================================================
+    # ========================================================
 
     if st.button(
         "Analyze Examination",
         type="primary",
         use_container_width=True,
-        key="analyze_medical_scan",
+        key="medusa_analyze_button",
     ):
 
         if not patient_name:
 
             st.error(
                 "Enter the patient's full name first."
+            )
+
+            return
+
+        user = get_current_user()
+
+        if user is None:
+
+            st.error(
+                "Your login session has expired. "
+                "Please log in again."
             )
 
             return
@@ -406,34 +517,36 @@ if st.session_state.patient_id:
                         image
                     )
 
-            user = get_current_user()
-
-            if user is None:
-
-                st.error(
-                    "Your login session has expired."
-                )
-
-                return
-
             supabase = get_supabase()
 
-            extension = (
-                uploaded.name.split(".")[-1].lower()
-                if uploaded
-                else "png"
-            )
+            # ------------------------------------------------
+            # SAVE IMAGE
+            # ------------------------------------------------
+
+            extension = "png"
+
+            content_type = "image/png"
+
+            if uploaded is not None:
+
+                if "." in uploaded.name:
+
+                    extension = (
+                        uploaded.name
+                        .rsplit(".", 1)[-1]
+                        .lower()
+                    )
+
+                content_type = (
+                    uploaded.type
+                    or "image/png"
+                )
 
             image_path = (
                 f"{user.id}/"
-                f"{st.session_state.patient_id}/"
-                f"{uuid.uuid4().hex}.{extension}"
-            )
-
-            content_type = (
-                uploaded.type
-                if uploaded
-                else "image/png"
+                f"{st.session_state.medusa_patient_id}/"
+                f"{uuid.uuid4().hex}."
+                f"{extension}"
             )
 
             supabase.storage.from_(
@@ -447,20 +560,32 @@ if st.session_state.patient_id:
                 },
             )
 
-            response = (
+            # ------------------------------------------------
+            # SAVE SCAN
+            # ------------------------------------------------
+
+            scan_response = (
                 supabase
                 .table("ai_scans")
                 .insert({
                     "user_id": user.id,
                     "patient_id": (
-                        st.session_state.patient_id
+                        st.session_state.medusa_patient_id
                     ),
                     "patient_name": patient_name,
                     "patient_state": patient_state,
                     "examination": examination,
                     "model": model_name,
-                    "prediction": result["prediction"],
-                    "confidence": result["confidence"],
+                    "prediction": result.get(
+                        "prediction",
+                        "Unknown",
+                    ),
+                    "confidence": float(
+                        result.get(
+                            "confidence",
+                            0,
+                        )
+                    ),
                     "probabilities": result.get(
                         "probabilities",
                         {},
@@ -471,37 +596,48 @@ if st.session_state.patient_id:
                 .execute()
             )
 
-            if not response.data:
+            if not scan_response.data:
 
                 st.error(
-                    "The scan could not be saved."
+                    "AI analysis completed, but "
+                    "the scan could not be saved."
                 )
 
                 return
 
-            scan_id = response.data[0]["id"]
+            scan_id = scan_response.data[0]["id"]
 
-            st.session_state.scan_id = scan_id
-            st.session_state.scan_model = model_name
-            st.session_state.scan_type = (
+            # ------------------------------------------------
+            # SESSION
+            # ------------------------------------------------
+
+            st.session_state.medusa_scan_id = scan_id
+
+            st.session_state.medusa_scan_result = result
+
+            st.session_state.medusa_scan_model = model_name
+
+            st.session_state.medusa_scan_type = (
                 "pneumonia"
                 if is_pneumonia
                 else "mammosense"
             )
-            st.session_state.scan_result = result
 
-            st.session_state.review_status = (
+            st.session_state.medusa_review_status = (
                 "NOT_REQUESTED"
             )
 
-            st.session_state.review_id = None
-            st.session_state.report_pdf = None
-            st.session_state.report_id = None
-            st.session_state.report_downloadable = False
+            st.session_state.medusa_review_id = None
+
+            st.session_state.medusa_report_id = None
+
+            st.session_state.medusa_report_path = None
 
             st.success(
-                "AI analysis completed."
+                "AI analysis completed successfully."
             )
+
+            st.rerun()
 
         except Exception as error:
 
@@ -513,28 +649,49 @@ if st.session_state.patient_id:
 
             return
 
-    # ============================================================
+    # ========================================================
     # RESULT
-    # ============================================================
+    # ========================================================
 
-    result = st.session_state.scan_result
+    result = st.session_state.medusa_scan_result
 
     if result is None:
         return
 
-    load_latest_review_status()
+    # ========================================================
+    # REVIEW STATUS
+    # ========================================================
+
+    status, review_id = get_review_status(
+        st.session_state.medusa_scan_id
+    )
+
+    st.session_state.medusa_review_status = status
+
+    if review_id:
+
+        st.session_state.medusa_review_id = review_id
+
+    # ========================================================
+    # AI RESULT
+    # ========================================================
 
     st.divider()
 
     st.subheader("AI Screening Result")
 
-    prediction = result.get(
-        "prediction",
-        "Unknown",
+    prediction = str(
+        result.get(
+            "prediction",
+            "Unknown",
+        )
     )
 
     confidence = float(
-        result.get("confidence", 0)
+        result.get(
+            "confidence",
+            0,
+        )
     )
 
     col1, col2 = st.columns(2)
@@ -542,8 +699,8 @@ if st.session_state.patient_id:
     with col1:
 
         if prediction.upper() in (
-            "PNEUMONIA",
             "MALIGNANT",
+            "PNEUMONIA",
         ):
 
             st.error(
@@ -563,12 +720,19 @@ if st.session_state.patient_id:
             f"{confidence:.1%}",
         )
 
+    # ========================================================
+    # PROBABILITIES
+    # ========================================================
+
     probabilities = result.get(
         "probabilities",
         {},
     )
 
-    if isinstance(probabilities, dict):
+    if (
+        isinstance(probabilities, dict)
+        and probabilities
+    ):
 
         st.subheader(
             "Probability Breakdown"
@@ -576,19 +740,31 @@ if st.session_state.patient_id:
 
         for label, value in probabilities.items():
 
-            value = float(value)
+            try:
+
+                value = float(value)
+
+            except Exception:
+
+                continue
 
             st.write(
-                f"{label}: {value:.2%}"
+                f"**{label}: {value:.2%}**"
             )
 
             st.progress(
-                min(max(value, 0), 1)
+                min(
+                    max(
+                        value,
+                        0.0,
+                    ),
+                    1.0,
+                )
             )
 
-    # ============================================================
+    # ========================================================
     # RADIOLOGIST WORKFLOW
-    # ============================================================
+    # ========================================================
 
     st.divider()
 
@@ -597,26 +773,17 @@ if st.session_state.patient_id:
     )
 
     st.info(
-        "Every examination must be reviewed by "
-        "a qualified radiologist before a final "
-        "medical report can be downloaded."
+        "Every examination requires review and "
+        "approval by a qualified radiologist "
+        "before the final medical report can "
+        "be downloaded."
     )
 
-    status = st.session_state.review_status
+    # --------------------------------------------------------
+    # NOT REQUESTED
+    # --------------------------------------------------------
 
-    if status == "APPROVED":
-
-        st.success(
-            "Radiologist review completed and approved."
-        )
-
-    elif status == "PENDING":
-
-        st.warning(
-            "Radiologist review is pending."
-        )
-
-    else:
+    if status == "NOT_REQUESTED":
 
         st.warning(
             "This examination has not yet been "
@@ -627,7 +794,7 @@ if st.session_state.patient_id:
             "Submit Examination for Radiologist Review",
             type="primary",
             use_container_width=True,
-            key="submit_radiologist_request",
+            key="medusa_submit_review",
         ):
 
             user = get_current_user()
@@ -644,13 +811,7 @@ if st.session_state.patient_id:
 
                 supabase = get_supabase()
 
-                # IMPORTANT:
-                # This inserts ONLY into radiologist_requests.
-                #
-                # We DO NOT insert into radiologist_reviews.
-                #
-                # This fixes:
-                # null value in column radiologist_name
+                # Check whether request already exists.
 
                 existing = (
                     supabase
@@ -658,7 +819,11 @@ if st.session_state.patient_id:
                     .select("id,status")
                     .eq(
                         "scan_id",
-                        st.session_state.scan_id,
+                        st.session_state.medusa_scan_id,
+                    )
+                    .order(
+                        "created_at",
+                        desc=True,
                     )
                     .limit(1)
                     .execute()
@@ -668,136 +833,110 @@ if st.session_state.patient_id:
 
                 if existing:
 
-                    st.session_state.review_status = (
+                    st.session_state.medusa_review_status = (
                         "PENDING"
                     )
 
                     st.info(
-                        "This examination has already "
-                        "been submitted for review."
-                    )
-
-                else:
-
-                    request_response = (
-                        supabase
-                        .table(
-                            "radiologist_requests"
-                        )
-                        .insert({
-                            "user_id": user.id,
-                            "scan_id": (
-                                st.session_state.scan_id
-                            ),
-                            "status": "PENDING",
-                        })
-                        .execute()
-                    )
-
-                    if not request_response.data:
-
-                        st.error(
-                            "The review request could "
-                            "not be created."
-                        )
-
-                        return
-
-                    (
-                        supabase
-                        .table("ai_scans")
-                        .update({
-                            "status":
-                                "AWAITING_RADIOLOGIST",
-                        })
-                        .eq(
-                            "id",
-                            st.session_state.scan_id,
-                        )
-                        .execute()
-                    )
-
-                    st.session_state.review_status = (
-                        "PENDING"
-                    )
-
-                    st.success(
-                        "Examination submitted successfully "
-                        "for radiologist review."
+                        "This examination is already "
+                        "in the radiologist review queue."
                     )
 
                     st.rerun()
+
+                request_response = (
+                    supabase
+                    .table("radiologist_requests")
+                    .insert({
+                        "user_id": user.id,
+                        "scan_id": (
+                            st.session_state.medusa_scan_id
+                        ),
+                        "status": "PENDING",
+                    })
+                    .execute()
+                )
+
+                if not request_response.data:
+
+                    st.error(
+                        "The review request could "
+                        "not be created."
+                    )
+
+                    return
+
+                # Update scan status.
+
+                (
+                    supabase
+                    .table("ai_scans")
+                    .update({
+                        "status":
+                            "AWAITING_RADIOLOGIST",
+                    })
+                    .eq(
+                        "id",
+                        st.session_state.medusa_scan_id,
+                    )
+                    .execute()
+                )
+
+                st.session_state.medusa_review_status = (
+                    "PENDING"
+                )
+
+                st.success(
+                    "Examination submitted to the "
+                    "radiologist successfully."
+                )
+
+                st.rerun()
 
             except Exception as error:
 
                 st.error(
                     "Could not submit the examination "
-                    "for review."
+                    "for radiologist review."
                 )
 
                 st.exception(error)
 
-    # ============================================================
-    # FINAL REPORT
-    # ============================================================
+    # --------------------------------------------------------
+    # PENDING
+    # --------------------------------------------------------
 
-    st.divider()
+    elif status == "PENDING":
 
-    st.subheader(
-        "Final Medical Report"
-    )
-
-    # ============================================================
-    # IMPORTANT:
-    # PATIENT CANNOT CREATE OR EDIT REVIEW.
-    # PATIENT CANNOT GENERATE REPORT.
-    # PATIENT CANNOT DOWNLOAD REPORT UNTIL
-    # RADIOLOGIST APPROVAL EXISTS.
-    # ============================================================
-
-    if status == "APPROVED":
-
-        st.success(
-            "Final radiologist-approved report is available."
+        st.warning(
+            "⏳ Radiologist review is pending."
         )
 
-        # --------------------------------------------------------
-        # Retrieve approved report
-        # --------------------------------------------------------
+        st.caption(
+            "The radiologist must review and approve "
+            "this examination before a report can "
+            "be downloaded."
+        )
 
-        try:
+    # --------------------------------------------------------
+    # APPROVED
+    # --------------------------------------------------------
 
-            supabase = get_supabase()
+    elif status == "APPROVED":
 
-            reports = (
-                supabase
-                .table("medical_reports")
-                .select("*")
-                .eq(
-                    "scan_id",
-                    st.session_state.scan_id,
-                )
-                .eq(
-                    "status",
-                    "APPROVED",
-                )
-                .order(
-                    "approved_at",
-                    desc=True,
-                )
-                .limit(1)
-                .execute()
-                .data
-                or []
-            )
+        st.success(
+            "✓ Radiologist review completed and approved."
+        )
 
-        except Exception:
+        # ----------------------------------------------------
+        # GET REPORT
+        # ----------------------------------------------------
 
-            reports = []
+        report = get_approved_report(
+            st.session_state.medusa_scan_id
+        )
 
-        if reports:
-
-            report = reports[0]
+        if report:
 
             report_id = report.get(
                 "report_id"
@@ -807,46 +946,82 @@ if st.session_state.patient_id:
                 "pdf_path"
             )
 
+            st.session_state.medusa_report_id = (
+                report_id
+            )
+
+            st.session_state.medusa_report_path = (
+                pdf_path
+            )
+
             if pdf_path:
 
                 try:
 
-                    pdf_response = (
+                    supabase = get_supabase()
+
+                    pdf_bytes = (
                         supabase
                         .storage
-                        .from_("medical-reports")
-                        .download(pdf_path)
+                        .from_(
+                            "medical-reports"
+                        )
+                        .download(
+                            pdf_path
+                        )
+                    )
+
+                    st.success(
+                        f"Final report approved. "
+                        f"Report ID: {report_id}"
                     )
 
                     st.download_button(
                         "Download Final Medical Report",
-                        data=pdf_response,
+                        data=pdf_bytes,
                         file_name=(
                             f"{report_id}.pdf"
                         ),
                         mime="application/pdf",
                         type="primary",
                         use_container_width=True,
-                        key="download_approved_report",
+                        key=(
+                            "medusa_download_"
+                            + str(report_id)
+                        ),
                     )
 
                 except Exception as error:
 
                     st.error(
-                        "The report was approved but "
-                        "could not be downloaded."
+                        "The report is approved, "
+                        "but the PDF could not be downloaded."
                     )
 
                     st.exception(error)
 
+            else:
+
+                st.warning(
+                    "The examination is approved, "
+                    "but the report file is not available."
+                )
+
         else:
 
             st.info(
-                "The radiologist has approved the examination. "
-                "The final report is being prepared."
+                "The radiologist has approved the "
+                "examination. The final report is "
+                "being prepared."
             )
 
-    else:
+    # ========================================================
+    # SECURITY NOTICE
+    # ========================================================
+
+    st.divider()
+
+    if status != "APPROVED":
 
         st.error(
             "DOWNLOAD LOCKED"
@@ -854,18 +1029,18 @@ if st.session_state.patient_id:
 
         st.caption(
             "A final medical report cannot be downloaded "
-            "until a radiologist has reviewed and approved "
-            "this examination."
+            "until radiologist review and approval "
+            "are recorded."
         )
 
-    # ============================================================
+    # ========================================================
     # DISCLAIMER
-    # ============================================================
+    # ========================================================
 
     st.divider()
 
     st.caption(
         "Medusa AI provides AI-assisted screening "
-        "and does not replace professional medical "
-        "diagnosis or treatment."
+        "information and does not replace professional "
+        "medical diagnosis or treatment."
     )
