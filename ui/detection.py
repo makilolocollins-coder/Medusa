@@ -418,7 +418,7 @@ def show_detection():
     elif tuberculosis:
 
         model_name = (
-            "MammoSense TB V12"
+            "MammoSense TB V13"
         )
 
     else:
@@ -893,9 +893,9 @@ def show_detection():
     if tuberculosis:
 
         st.caption(
-            "MammoSense TB V12 • TBX11K "
-            "binary chest X-ray classifier"
-        )
+    "MammoSense TB V13 • "
+    "binary chest X-ray classifier"
+)
 
         if (
             prediction.upper()
