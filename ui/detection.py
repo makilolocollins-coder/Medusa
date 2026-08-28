@@ -1009,12 +1009,12 @@ else:
 
       if brain_tumor:
 
-    st.caption(
-        "MammoSense Brain V3.1 • "
-        "3D U-Net • BraTS 2021"
+          st.caption(
+            "MammoSense Brain V3.1 • "
+            "3D U-Net • BraTS 2021"
     )
 
-    if (
+     if (
         prediction.upper()
          == "TUMOR"
     ):
