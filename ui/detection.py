@@ -391,24 +391,24 @@ def show_detection():
     # ========================================================
 
     pneumonia = (
-        model_choice
-        == "MammoSense Pneumonia — Chest X-ray"
-    )
+    model_choice
+    == "MammoSense Pneumonia — Chest X-ray"
+)
 
-    tuberculosis = (
-        model_choice
-        == "MammoSense Tuberculosis — Chest X-ray"
-    )
+tuberculosis = (
+    model_choice
+    == "MammoSense Tuberculosis — Chest X-ray"
+)
 
-    mammosense = (
-        model_choice
-        == "MammoSense — Breast Ultrasound"
-    )
+mammosense = (
+    model_choice
+    == "MammoSense — Breast Ultrasound"
+)
 
-    brain_tumor = (
-        model_choice
-        == "MammoSense Brain — MRI"
-    )
+brain_tumor = (
+    model_choice
+    == "MammoSense Brain — MRI"
+)
 
     # ========================================================
     # EXAMINATION NAME
