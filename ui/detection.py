@@ -1,3 +1,28 @@
+# ============================================================
+# MEDUSA AI
+# MEDICAL AI DETECTION INTERFACE
+#
+# SUPPORTED MODELS
+# ------------------------------------------------------------
+# 1. MammoSense V2
+#    Breast Ultrasound
+#
+# 2. MammoSense Pneumonia V2
+#    Chest X-ray
+#
+# 3. MammoSense TB V13
+#    Chest X-ray
+#
+# 4. MammoSense Brain V3.1
+#    3D Brain MRI Segmentation
+#
+# Brain MRI inputs:
+#    T1
+#    T1CE
+#    T2
+#    FLAIR
+# ============================================================
+
 import io
 import uuid
 from datetime import datetime
@@ -26,7 +51,6 @@ from ai.tuberculosis import (
 from ai.braintumor import (
     load_model as load_brain_model,
     predict as predict_brain,
-    create_overlay,
 )
 
 
@@ -162,10 +186,7 @@ def review_status(scan_id):
 
     if not scan_id:
 
-        return (
-            "NOT_REQUESTED",
-            None,
-        )
+        return "NOT_REQUESTED", None
 
     sb = get_supabase()
 
@@ -390,25 +411,25 @@ def show_detection():
     # MODEL FLAGS
     # ========================================================
 
+    mammosense = (
+        model_choice
+        == "MammoSense — Breast Ultrasound"
+    )
+
     pneumonia = (
-    model_choice
-    == "MammoSense Pneumonia — Chest X-ray"
-)
+        model_choice
+        == "MammoSense Pneumonia — Chest X-ray"
+    )
 
-tuberculosis = (
-    model_choice
-    == "MammoSense Tuberculosis — Chest X-ray"
-)
+    tuberculosis = (
+        model_choice
+        == "MammoSense Tuberculosis — Chest X-ray"
+    )
 
-mammosense = (
-    model_choice
-    == "MammoSense — Breast Ultrasound"
-)
-
-brain_tumor = (
-    model_choice
-    == "MammoSense Brain — MRI"
-)
+    brain_tumor = (
+        model_choice
+        == "MammoSense Brain — MRI"
+    )
 
     # ========================================================
     # EXAMINATION NAME
@@ -427,7 +448,7 @@ brain_tumor = (
         examination = "Breast Ultrasound"
 
     # ========================================================
-    # MODEL NAME STORED IN DATABASE
+    # DATABASE MODEL NAME
     # ========================================================
 
     if pneumonia:
@@ -465,51 +486,69 @@ brain_tumor = (
 
     if brain_tumor:
 
+        st.subheader(
+            "Brain MRI Volumes"
+        )
+
         st.info(
             "MammoSense Brain V3.1 requires four "
-            "registered 3D MRI volumes: T1, T1CE, "
-            "T2 and T2-FLAIR."
+            "co-registered MRI volumes: T1, T1CE, "
+            "T2 and FLAIR."
         )
 
-        st.caption(
-            "Accepted format: NIfTI (.nii or .nii.gz)"
-        )
+        c1, c2 = st.columns(2)
 
-        t1_file = st.file_uploader(
-            "T1 MRI",
-            type=[
-                "nii",
-                "gz",
-            ],
-            key="brain_t1_upload",
-        )
+        with c1:
 
-        t1ce_file = st.file_uploader(
-            "T1CE MRI",
-            type=[
-                "nii",
-                "gz",
-            ],
-            key="brain_t1ce_upload",
-        )
+            t1_file = st.file_uploader(
+                "T1 MRI",
+                type=[
+                    "nii",
+                    "nii.gz",
+                    "gz",
+                ],
+                key="brain_t1_upload",
+            )
 
-        t2_file = st.file_uploader(
-            "T2 MRI",
-            type=[
-                "nii",
-                "gz",
-            ],
-            key="brain_t2_upload",
-        )
+            t1ce_file = st.file_uploader(
+                "T1CE MRI",
+                type=[
+                    "nii",
+                    "nii.gz",
+                    "gz",
+                ],
+                key="brain_t1ce_upload",
+            )
 
-        flair_file = st.file_uploader(
-            "T2-FLAIR MRI",
-            type=[
-                "nii",
-                "gz",
-            ],
-            key="brain_flair_upload",
-        )
+        with c2:
+
+            t2_file = st.file_uploader(
+                "T2 MRI",
+                type=[
+                    "nii",
+                    "nii.gz",
+                    "gz",
+                ],
+                key="brain_t2_upload",
+            )
+
+            flair_file = st.file_uploader(
+                "FLAIR MRI",
+                type=[
+                    "nii",
+                    "nii.gz",
+                    "gz",
+                ],
+                key="brain_flair_upload",
+            )
+
+        uploaded = None
+
+        image_bytes = None
+
+        # ----------------------------------------------------
+        # VALIDATE ALL FOUR MODALITIES
+        # ----------------------------------------------------
 
         if not all(
             [
@@ -527,12 +566,74 @@ brain_tumor = (
 
             return
 
-        uploaded = None
+        # ----------------------------------------------------
+        # READ FILES
+        # ----------------------------------------------------
 
-        image_bytes = None
+        t1_bytes = t1_file.getvalue()
+        t1ce_bytes = t1ce_file.getvalue()
+        t2_bytes = t2_file.getvalue()
+        flair_bytes = flair_file.getvalue()
+
+        # ----------------------------------------------------
+        # BASIC FILE VALIDATION
+        # ----------------------------------------------------
+
+        if not all(
+            [
+                t1_bytes,
+                t1ce_bytes,
+                t2_bytes,
+                flair_bytes,
+            ]
+        ):
+
+            st.error(
+                "One or more MRI files are empty."
+            )
+
+            return
+
+        st.success(
+            "All four MRI volumes uploaded successfully."
+        )
+
+        # ----------------------------------------------------
+        # MRI FILE INFORMATION
+        # ----------------------------------------------------
+
+        m1, m2, m3, m4 = st.columns(4)
+
+        with m1:
+
+            st.metric(
+                "T1",
+                f"{len(t1_bytes) / 1024 / 1024:.1f} MB",
+            )
+
+        with m2:
+
+            st.metric(
+                "T1CE",
+                f"{len(t1ce_bytes) / 1024 / 1024:.1f} MB",
+            )
+
+        with m3:
+
+            st.metric(
+                "T2",
+                f"{len(t2_bytes) / 1024 / 1024:.1f} MB",
+            )
+
+        with m4:
+
+            st.metric(
+                "FLAIR",
+                f"{len(flair_bytes) / 1024 / 1024:.1f} MB",
+            )
 
     # ========================================================
-    # STANDARD IMAGE UPLOAD
+    # STANDARD MEDICAL IMAGE UPLOAD
     # ========================================================
 
     else:
@@ -576,9 +677,9 @@ brain_tumor = (
 
             return
 
-        # ====================================================
+        # ----------------------------------------------------
         # OPEN IMAGE
-        # ====================================================
+        # ----------------------------------------------------
 
         try:
 
@@ -649,15 +750,34 @@ brain_tumor = (
             ):
 
                 # ==========================================
+                # BRAIN MRI
+                # ==========================================
+
+                if brain_tumor:
+
+                    load_brain_model()
+
+                    result = (
+                        predict_brain(
+                            t1_bytes,
+                            t1ce_bytes,
+                            t2_bytes,
+                            flair_bytes,
+                        )
+                    )
+
+                # ==========================================
                 # PNEUMONIA
                 # ==========================================
 
-                if pneumonia:
+                elif pneumonia:
 
                     load_pneumonia_model()
 
-                    result = predict_pneumonia(
-                        image
+                    result = (
+                        predict_pneumonia(
+                            image
+                        )
                     )
 
                 # ==========================================
@@ -668,23 +788,10 @@ brain_tumor = (
 
                     load_tb_model()
 
-                    result = predict_tb(
-                        image
-                    )
-
-                # ==========================================
-                # BRAIN TUMOR
-                # ==========================================
-
-                elif brain_tumor:
-
-                    load_brain_model()
-
-                    result = predict_brain(
-                        t1_file.getvalue(),
-                        t1ce_file.getvalue(),
-                        t2_file.getvalue(),
-                        flair_file.getvalue(),
+                    result = (
+                        predict_tb(
+                            image
+                        )
                     )
 
                 # ==========================================
@@ -695,8 +802,10 @@ brain_tumor = (
 
                     load_mammo_model()
 
-                    result = predict_mammo(
-                        image
+                    result = (
+                        predict_mammo(
+                            image
+                        )
                     )
 
             # =================================================
@@ -740,112 +849,160 @@ brain_tumor = (
             sb = get_supabase()
 
             # =================================================
-            # STORAGE
+            # STORAGE DATA
             # =================================================
+
+            # Brain MRI is a four-file examination.
+            # We store the FLAIR volume as the primary
+            # scan reference if the existing database schema
+            # only accepts one image_path.
 
             if brain_tumor:
 
-                # ------------------------------------------------
-                # Brain MRI contains four separate NIfTI files.
-                #
-                # The current ai_scans schema has one image_path
-                # field, so we do not pretend that the four MRI
-                # volumes are a single PNG/JPEG.
-                # ------------------------------------------------
+                storage_bytes = flair_bytes
 
-                image_path = None
+                storage_filename = (
+                    flair_file.name
+                )
+
+                content_type = (
+                    flair_file.type
+                    or "application/gzip"
+                )
+
+                extension = "nii.gz"
 
             else:
 
-                extension = (
-                    uploaded.name.rsplit(
-                        ".",
-                        1,
-                    )[-1].lower()
+                storage_bytes = image_bytes
+
+                storage_filename = (
+                    uploaded.name
+                    if uploaded
+                    else "scan.png"
                 )
 
                 content_type = (
                     uploaded.type
-                    or "image/png"
+                    if uploaded
+                    else "image/png"
                 )
 
-                image_path = (
-                    f"{user.id}/"
-                    f"{st.session_state.patient_id}/"
-                    f"{uuid.uuid4().hex}."
-                    f"{extension}"
-                )
+                if "." in storage_filename:
 
-                (
-                    sb
-                    .storage
-                    .from_(
-                        "mammosense-scans"
+                    extension = (
+                        storage_filename
+                        .rsplit(
+                            ".",
+                            1,
+                        )[-1]
+                        .lower()
                     )
-                    .upload(
-                        image_path,
-                        image_bytes,
-                        {
-                            "content-type":
-                                content_type,
-                            "upsert":
-                                "false",
-                        },
-                    )
+
+                else:
+
+                    extension = "png"
+
+            # =================================================
+            # STORAGE PATH
+            # =================================================
+
+            image_path = (
+                f"{user.id}/"
+                f"{st.session_state.patient_id}/"
+                f"{uuid.uuid4().hex}."
+                f"{extension}"
+            )
+
+            # =================================================
+            # UPLOAD PRIMARY SCAN
+            # =================================================
+
+            (
+                sb
+                .storage
+                .from_(
+                    "mammosense-scans"
                 )
+                .upload(
+                    image_path,
+                    storage_bytes,
+                    {
+                        "content-type":
+                            content_type,
+                        "upsert":
+                            "false",
+                    },
+                )
+            )
+
+            # =================================================
+            # PROBABILITIES
+            # =================================================
+
+            probabilities = result.get(
+                "probabilities",
+                {},
+            )
+
+            if not isinstance(
+                probabilities,
+                dict,
+            ):
+
+                probabilities = {}
 
             # =================================================
             # SAVE AI SCAN
             # =================================================
 
+            scan_data = {
+                "user_id":
+                    user.id,
+
+                "patient_id":
+                    st.session_state.patient_id,
+
+                "patient_name":
+                    patient_name,
+
+                "patient_state":
+                    patient_state,
+
+                "examination":
+                    examination,
+
+                "model":
+                    model_name,
+
+                "prediction":
+                    result.get(
+                        "prediction"
+                    ),
+
+                "confidence":
+                    float(
+                        result.get(
+                            "confidence",
+                            0,
+                        )
+                    ),
+
+                "probabilities":
+                    probabilities,
+
+                "image_path":
+                    image_path,
+
+                "status":
+                    "AI_COMPLETED",
+            }
+
             response = (
                 sb
                 .table("ai_scans")
                 .insert(
-                    {
-                        "user_id":
-                            user.id,
-
-                        "patient_id":
-                            st.session_state.patient_id,
-
-                        "patient_name":
-                            patient_name,
-
-                        "patient_state":
-                            patient_state,
-
-                        "examination":
-                            examination,
-
-                        "model":
-                            model_name,
-
-                        "prediction":
-                            result.get(
-                                "prediction"
-                            ),
-
-                        "confidence":
-                            float(
-                                result.get(
-                                    "confidence",
-                                    0,
-                                )
-                            ),
-
-                        "probabilities":
-                            result.get(
-                                "probabilities",
-                                {},
-                            ),
-
-                        "image_path":
-                            image_path,
-
-                        "status":
-                            "AI_COMPLETED",
-                    }
+                    scan_data
                 )
                 .execute()
             )
@@ -889,7 +1046,11 @@ brain_tumor = (
                 "not be analyzed."
             )
 
-            st.exception(error)
+            with st.expander(
+                "Technical details"
+            ):
+
+                st.exception(error)
 
             return
 
@@ -959,33 +1120,24 @@ brain_tumor = (
 
     with c1:
 
-        if brain_tumor:
+        prediction_upper = (
+            prediction.upper()
+        )
 
-            is_positive = bool(
-                result.get(
-                    "tumor_detected",
-                    False,
-                )
-            )
+        positive_findings = (
+            "MALIGNANT",
+            "PNEUMONIA",
+            "TUBERCULOSIS",
+            "TB",
+            "POSITIVE",
+            "TUMOR",
+            "DETECTED",
+        )
 
-        else:
-
-            prediction_upper = (
-                prediction.upper()
-            )
-
-            positive_findings = (
-                "MALIGNANT",
-                "PNEUMONIA",
-                "TUBERCULOSIS",
-                "TB",
-                "POSITIVE",
-            )
-
-            is_positive = any(
-                label in prediction_upper
-                for label in positive_findings
-            )
+        is_positive = any(
+            label in prediction_upper
+            for label in positive_findings
+        )
 
         if is_positive:
 
@@ -1011,19 +1163,23 @@ brain_tumor = (
         )
 
     # ========================================================
-    # TB-SPECIFIC INFORMATION
+    # TB INFORMATION
     # ========================================================
 
     if tuberculosis:
 
         st.caption(
             "MammoSense TB V13 • "
-            "binary chest X-ray classifier"
+            "Binary chest X-ray classifier"
         )
 
         if (
-            prediction.upper()
-            == "TB"
+            prediction_upper
+            in (
+                "TB",
+                "TUBERCULOSIS",
+                "POSITIVE",
+            )
         ):
 
             st.warning(
@@ -1031,40 +1187,39 @@ brain_tumor = (
                 "Radiologist review is required."
             )
 
-        elif (
-            prediction.upper()
-            == "NON_TB"
+        elif prediction_upper in (
+            "NON_TB",
+            "NON-TB",
+            "NEGATIVE",
         ):
 
             st.success(
                 "AI classified this examination "
-                "as NON_TB."
+                "as NON-TB."
             )
 
     # ========================================================
-    # BRAIN TUMOR-SPECIFIC INFORMATION
+    # BRAIN TUMOR INFORMATION
     # ========================================================
 
     if brain_tumor:
 
         st.caption(
             "MammoSense Brain V3.1 • "
-            "3D U-Net • BraTS 2021"
+            "3D U-Net • Brain MRI segmentation"
         )
 
-        tumor_detected = bool(
+        if (
             result.get(
                 "tumor_detected",
                 False,
             )
-        )
-
-        if tumor_detected:
+        ):
 
             st.warning(
-                "A significant segmented tumor "
-                "region was detected by the AI model. "
-                "Radiologist review is required."
+                "Tumor segmentation detected by "
+                "the AI model. Radiologist review "
+                "is required."
             )
 
         else:
@@ -1082,114 +1237,105 @@ brain_tumor = (
             "tumor_percentage"
         )
 
-        if tumor_percentage is not None:
+        if tumor_percentage is None:
 
-            try:
+            tumor_fraction = result.get(
+                "tumor_fraction"
+            )
 
-                tumor_percentage = float(
-                    tumor_percentage
-                )
+            if tumor_fraction is not None:
 
-                st.metric(
-                    "Estimated Tumor Burden",
-                    f"{tumor_percentage:.2f}%",
-                )
+                try:
 
-            except Exception:
+                    tumor_percentage = (
+                        float(
+                            tumor_fraction
+                        )
+                        * 100.0
+                    )
 
-                pass
+                except Exception:
+
+                    tumor_percentage = None
 
         # ----------------------------------------------------
         # TUMOR VOXELS
         # ----------------------------------------------------
 
-        tumor_voxels = result.get(
+        tumor_volume = result.get(
             "tumor_voxels"
         )
 
-        if tumor_voxels is not None:
+        if tumor_volume is None:
 
-            try:
-
-                st.caption(
-                    "Segmented tumor voxels: "
-                    f"{int(tumor_voxels):,}"
-                )
-
-            except Exception:
-
-                pass
+            tumor_volume = result.get(
+                "tumor_volume_voxels"
+            )
 
         # ----------------------------------------------------
-        # MAXIMUM PROBABILITY
+        # DISPLAY SEGMENTATION METRICS
+        # ----------------------------------------------------
+
+        b1, b2 = st.columns(2)
+
+        with b1:
+
+            if tumor_percentage is not None:
+
+                st.metric(
+                    "Segmented Tumor Fraction",
+                    f"{float(tumor_percentage):.2f}%",
+                )
+
+        with b2:
+
+            if tumor_volume is not None:
+
+                st.metric(
+                    "Tumor Voxels",
+                    f"{int(tumor_volume):,}",
+                )
+
+        # ----------------------------------------------------
+        # MAXIMUM / MEAN PROBABILITY
         # ----------------------------------------------------
 
         maximum_probability = result.get(
             "maximum_probability"
         )
 
-        if maximum_probability is not None:
+        mean_probability = result.get(
+            "mean_probability"
+        )
 
-            try:
+        if (
+            maximum_probability is not None
+            or mean_probability is not None
+        ):
 
-                st.metric(
-                    "Maximum Tumor Probability",
-                    f"{float(maximum_probability):.2%}",
-                )
-
-            except Exception:
-
-                pass
-
-        # ----------------------------------------------------
-        # REPRESENTATIVE OVERLAY
-        # ----------------------------------------------------
-
-        try:
-
-            if (
-                flair_file
-                and result.get("mask") is not None
-            ):
-
-                overlay_bytes = (
-                    create_overlay(
-                        flair_file.getvalue(),
-                        result["mask"],
-                    )
-                )
-
-                st.subheader(
-                    "Representative MRI Segmentation"
-                )
-
-                st.image(
-                    overlay_bytes,
-                    caption=(
-                        "Representative axial FLAIR slice "
-                        "with AI segmentation overlay"
-                    ),
-                    use_container_width=True,
-                )
-
-                st.caption(
-                    "This visualization is a representative "
-                    "slice of the 3D segmentation and should "
-                    "not be interpreted as a standalone diagnosis."
-                )
-
-        except Exception as error:
-
-            st.warning(
-                "The segmentation overlay could "
-                "not be generated."
+            st.subheader(
+                "Segmentation Confidence"
             )
 
-            with st.expander(
-                "Overlay details"
-            ):
+            p1, p2 = st.columns(2)
 
-                st.exception(error)
+            with p1:
+
+                if maximum_probability is not None:
+
+                    st.metric(
+                        "Maximum Voxel Probability",
+                        f"{float(maximum_probability):.2%}",
+                    )
+
+            with p2:
+
+                if mean_probability is not None:
+
+                    st.metric(
+                        "Mean Voxel Probability",
+                        f"{float(mean_probability):.2%}",
+                    )
 
     # ========================================================
     # PROBABILITIES
@@ -1248,35 +1394,62 @@ brain_tumor = (
     if brain_tumor:
 
         with st.expander(
-            "Brain AI Technical Information"
+            "Brain MRI Technical Information"
         ):
 
             st.write(
-                "Model: MammoSense Brain V3.1"
+                "Model: "
+                + str(
+                    result.get(
+                        "model",
+                        "MammoSense Brain V3.1",
+                    )
+                )
             )
 
             st.write(
-                "Architecture: 3D U-Net"
+                "Architecture: "
+                + str(
+                    result.get(
+                        "architecture",
+                        "3D U-Net",
+                    )
+                )
             )
 
             st.write(
-                "Dataset: BraTS 2021"
+                "Input modalities: "
+                + ", ".join(
+                    result.get(
+                        "input_modalities",
+                        [
+                            "T1",
+                            "T1CE",
+                            "T2",
+                            "FLAIR",
+                        ],
+                    )
+                )
             )
 
             st.write(
-                "Task: Binary 3D brain tumor segmentation"
+                "Input shape: "
+                + str(
+                    result.get(
+                        "input_shape",
+                        [96, 96, 96],
+                    )
+                )
             )
 
             st.write(
-                "Input modalities: T1, T1CE, T2, FLAIR"
-            )
-
-            st.write(
-                "Processed volume: 96 × 96 × 96"
-            )
-
-            st.write(
-                "Output: Binary tumor segmentation mask"
+                "Inference device: "
+                + str(
+                    result.get(
+                        "device",
+                        "unknown",
+                    )
+                )
             )
 
     # ========================================================
@@ -1357,7 +1530,8 @@ brain_tumor = (
                 if not scan_id:
 
                     st.error(
-                        "No saved scan was found."
+                        "No scan is available "
+                        "for review."
                     )
 
                     return
@@ -1468,7 +1642,11 @@ brain_tumor = (
                     "examination for review."
                 )
 
-                st.exception(error)
+                with st.expander(
+                    "Technical details"
+                ):
+
+                    st.exception(error)
 
     # ========================================================
     # FINAL MEDICAL REPORT
@@ -1598,7 +1776,11 @@ brain_tumor = (
             "not be loaded."
         )
 
-        st.exception(error)
+        with st.expander(
+            "Technical details"
+        ):
+
+            st.exception(error)
 
     # ========================================================
     # FOOTER
