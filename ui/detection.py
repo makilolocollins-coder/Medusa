@@ -642,6 +642,23 @@ else:
                         )
                     )
 
+                #================================================
+                #BRAIN TUMOR
+                #================================================
+
+                elif brain_tumor:
+
+                    load_brain_model()
+
+                    result = (
+                        predict_brain(
+                                 t1_file,
+                                 t1ce_file,
+                                 t2_file,
+                                 flair_file,
+                      )
+                  )
+
                 # ==============================================
                 # BREAST ULTRASOUND
                 # ==============================================
@@ -908,7 +925,7 @@ else:
     c1, c2 = st.columns(2)
 
     # ========================================================
-    # FINDING
+    # POSITIVE FINDINGS LABEL
     # ========================================================
 
     with c1:
@@ -923,6 +940,7 @@ else:
             "TUBERCULOSIS",
             "TB",
             "POSITIVE",
+            "TUMOR",
         )
 
         is_positive = any(
@@ -984,6 +1002,59 @@ else:
                 "as NON_TB."
             )
 
+
+    # ========================================================
+    # BRAIN TUMOR-SPECIFIC INFORMATION
+    # ========================================================
+
+      if brain_tumor:
+
+    st.caption(
+        "MammoSense Brain V3.1 • "
+        "3D U-Net • BraTS 2021"
+    )
+
+    if (
+        prediction.upper()
+         == "TUMOR"
+    ):
+
+        st.warning(
+            "Tumor segmentation detected by "
+            "the AI model. Radiologist review "
+            "is required."
+        )
+
+    else:
+
+        st.success(
+            "No tumor detected by the AI "
+            "segmentation model."
+        )
+
+    tumor_percentage = result.get(
+        "tumor_percentage"
+    )
+
+    tumor_volume = result.get(
+        "tumor_volume_voxels"
+    )
+
+    if tumor_percentage is not None:
+
+        st.metric(
+            "Estimated Tumor Volume",
+            f"{float(tumor_percentage):.2f}% "
+            "of segmented brain volume",
+        )
+
+    if tumor_volume is not None:
+
+        st.caption(
+            "Segmented tumor voxels: "
+            f"{int(tumor_volume):,}"
+            )
+    
     # ========================================================
     # PROBABILITIES
     # ========================================================
