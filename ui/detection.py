@@ -411,7 +411,7 @@ def show_detection():
         
     elif brain_tumor:
 
-    examination = "Brain MRI"
+        examination = "Brain MRI"
     
     else:
 
