@@ -23,6 +23,13 @@ from ai.tuberculosis import (
     predict as predict_tb,
 )
 
+from ai.braintumor import (
+    load_model as load_brain_model,
+    predict as predict_brain,
+)
+
+
+
 
 # ============================================================
 # NIGERIAN STATES
@@ -370,6 +377,7 @@ def show_detection():
             "MammoSense — Breast Ultrasound",
             "MammoSense Pneumonia — Chest X-ray",
             "MammoSense Tuberculosis — Chest X-ray",
+            "MammoSense Brain — MRI",
         ],
         key="medical_model_input",
     )
@@ -400,7 +408,11 @@ def show_detection():
     if pneumonia or tuberculosis:
 
         examination = "Chest X-ray"
+        
+    elif brain_tumor:
 
+    examination = "Brain MRI"
+    
     else:
 
         examination = "Breast Ultrasound"
@@ -421,6 +433,12 @@ def show_detection():
             "MammoSense TB V13"
         )
 
+    elif brain_tumor:
+
+        model_name = (
+           "MammoSense Brain V3.1"
+       )
+    
     else:
 
         model_name = (
@@ -432,9 +450,60 @@ def show_detection():
         "for AI-assisted screening."
     )
 
-    # ========================================================
-    # IMAGE UPLOAD
-    # ========================================================
+# ========================================================
+# BRAIN MRI UPLOAD AND OTHER SCANS 
+# ========================================================
+
+if brain_tumor:
+
+    st.info(
+        "Upload the four MRI volumes required by "
+        "MammoSense Brain V3.1: T1, T1CE, T2 and FLAIR."
+    )
+
+    t1_file = st.file_uploader(
+        "T1 MRI",
+        type=["nii", "gz"],
+        key="brain_t1_upload",
+    )
+
+    t1ce_file = st.file_uploader(
+        "T1CE MRI",
+        type=["nii", "gz"],
+        key="brain_t1ce_upload",
+    )
+
+    t2_file = st.file_uploader(
+        "T2 MRI",
+        type=["nii", "gz"],
+        key="brain_t2_upload",
+    )
+
+    flair_file = st.file_uploader(
+        "T2-FLAIR MRI",
+        type=["nii", "gz"],
+        key="brain_flair_upload",
+    )
+
+    if not all([
+        t1_file,
+        t1ce_file,
+        t2_file,
+        flair_file,
+    ]):
+
+        st.warning(
+            "Upload all four MRI volumes "
+            "before continuing."
+        )
+
+        return
+
+    uploaded = None
+
+    image_bytes = None
+
+else:
 
     uploaded = st.file_uploader(
         "Upload medical image",
@@ -449,9 +518,7 @@ def show_detection():
 
     if uploaded:
 
-        image_bytes = (
-            uploaded.getvalue()
-        )
+        image_bytes = uploaded.getvalue()
 
         st.session_state.scan_image_bytes = (
             image_bytes
