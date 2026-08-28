@@ -10,13 +10,7 @@ import streamlit as st
 from ui.styles import load_styles
 
 from ui.dashboard import show_dashboard
-try:
 from ui.detection import show_detection
-except Exception as e:
-    import traceback
-    st.error("ERROR LOADING ui.detection")
-    st.code(traceback.format_exc())
-    st.stop()
 from ui.health import show_health
 from ui.marketplace import show_marketplace
 from ui.profile import show_profile
