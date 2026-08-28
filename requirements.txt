@@ -8,3 +8,4 @@ numpy
 supabase
 reportlab
 qrcode
+nibabel
