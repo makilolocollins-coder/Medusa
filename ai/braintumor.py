@@ -1,492 +1,200 @@
-# ================================================================
-# MAMMOSENSE BRAIN V3.1
-# 3D BRAIN TUMOR SEGMENTATION INFERENCE
+# ============================================================
+# MEDUSA AI
+# MAMMOSENSE BRAIN MRI V3.1
+#
+# 2D BRAIN MRI CLASSIFICATION
+#
+# Classes:
+#   0 = glioma
+#   1 = meningioma
+#   2 = pituitary
+#   3 = notumor
+#
+# Architecture:
+#   ResNet-50
+#
+# Input:
+#   Single 2D MRI image
+#   RGB
+#   224 x 224
 #
 # Hugging Face:
-# Makky07/Brain_Tumor
+#   Makky07/BRAIN_MRI
 #
 # Checkpoint:
-# mammosense_brain_v31_best.pt
-#
-# INPUT:
-#   T1
-#   T1CE
-#   T2
-#   FLAIR
-#
-# INPUT SHAPE:
-#   [1, 4, 96, 96, 96]
-#
-# OUTPUT:
-#   Binary tumor segmentation
-#
-# IMPORTANT:
-#   This module performs AI-assisted segmentation.
-#   It does NOT provide a clinical diagnosis.
-# ================================================================
+#   mammosense_brain_classifier_best.pt
+# ============================================================
 
-import io
 import os
-import tempfile
-import urllib.request
-
-import numpy as np
-import nibabel as nib
-from PIL import Image
-
-import streamlit as st
 
 import torch
 import torch.nn as nn
+from PIL import Image
+from torchvision import models, transforms
+from huggingface_hub import hf_hub_download
 
-from scipy.ndimage import zoom, label
 
-
-# ================================================================
+# ============================================================
 # CONFIGURATION
-# ================================================================
+# ============================================================
 
-DEVICE = torch.device(
-    "cuda" if torch.cuda.is_available() else "cpu"
+REPO_ID = "Makky07/BRAIN_MRI"
+
+MODEL_FILENAME = (
+    "mammosense_brain_classifier_best.pt"
 )
 
-IMAGE_SHAPE = (
-    96,
-    96,
-    96,
-)
+IMAGE_SIZE = 224
 
-HF_REPO = (
-    "Makky07/Brain_Tumor"
-)
-
-HF_MODEL_URL = (
-    "https://huggingface.co/"
-    "Makky07/Brain_Tumor/"
-    "resolve/main/"
-    "mammosense_brain_v31_best.pt"
-)
-
-MODEL_NAME = (
-    "MammoSense Brain V3.1"
-)
-
-ARCHITECTURE = (
-    "3D_U-Net"
-)
-
-INPUT_MODALITIES = [
-    "T1",
-    "T1CE",
-    "T2",
-    "FLAIR",
+CLASS_NAMES = [
+    "glioma",
+    "meningioma",
+    "pituitary",
+    "notumor",
 ]
 
-
-# ================================================================
-# INFERENCE SAFETY THRESHOLDS
-# ================================================================
-#
-# These are engineering safeguards used to reject extremely small
-# isolated predictions.
-#
-# They are NOT clinical diagnostic thresholds.
-#
-# They should ideally be tuned against a held-out validation set
-# before being used for clinical research claims.
-# ================================================================
-
-SEGMENTATION_THRESHOLD = 0.5
-
-MIN_TUMOR_FRACTION = 0.001
-
-MIN_CONNECTED_VOXELS = 100
-
-
-# ================================================================
-# 3D U-NET
-#
-# EXACT ARCHITECTURE USED DURING V3.1 TRAINING
-# ================================================================
-
-
-class DoubleConv3D(nn.Module):
-
-    def __init__(
-        self,
-        in_channels,
-        out_channels,
-    ):
-
-        super().__init__()
-
-        self.block = nn.Sequential(
-
-            nn.Conv3d(
-                in_channels,
-                out_channels,
-                kernel_size=3,
-                padding=1,
-                bias=False,
-            ),
-
-            nn.InstanceNorm3d(
-                out_channels
-            ),
-
-            nn.LeakyReLU(
-                0.01,
-                inplace=True,
-            ),
-
-            nn.Conv3d(
-                out_channels,
-                out_channels,
-                kernel_size=3,
-                padding=1,
-                bias=False,
-            ),
-
-            nn.InstanceNorm3d(
-                out_channels
-            ),
-
-            nn.LeakyReLU(
-                0.01,
-                inplace=True,
-            ),
-        )
-
-    def forward(
-        self,
-        x,
-    ):
-
-        return self.block(x)
-
-
-class UNet3D(nn.Module):
-
-    def __init__(self):
-
-        super().__init__()
-
-        # --------------------------------------------------------
-        # ENCODER
-        # --------------------------------------------------------
-
-        self.enc1 = DoubleConv3D(
-            4,
-            32,
-        )
-
-        self.enc2 = DoubleConv3D(
-            32,
-            64,
-        )
-
-        self.enc3 = DoubleConv3D(
-            64,
-            128,
-        )
-
-        self.enc4 = DoubleConv3D(
-            128,
-            256,
-        )
-
-        self.pool = nn.MaxPool3d(
-            kernel_size=2
-        )
-
-        # --------------------------------------------------------
-        # BOTTLENECK
-        # --------------------------------------------------------
-
-        self.bottleneck = DoubleConv3D(
-            256,
-            512,
-        )
-
-        # --------------------------------------------------------
-        # DECODER
-        # --------------------------------------------------------
-
-        self.up4 = nn.ConvTranspose3d(
-            512,
-            256,
-            kernel_size=2,
-            stride=2,
-        )
-
-        self.dec4 = DoubleConv3D(
-            512,
-            256,
-        )
-
-        self.up3 = nn.ConvTranspose3d(
-            256,
-            128,
-            kernel_size=2,
-            stride=2,
-        )
-
-        self.dec3 = DoubleConv3D(
-            256,
-            128,
-        )
-
-        self.up2 = nn.ConvTranspose3d(
-            128,
-            64,
-            kernel_size=2,
-            stride=2,
-        )
-
-        self.dec2 = DoubleConv3D(
-            128,
-            64,
-        )
-
-        self.up1 = nn.ConvTranspose3d(
-            64,
-            32,
-            kernel_size=2,
-            stride=2,
-        )
-
-        self.dec1 = DoubleConv3D(
-            64,
-            32,
-        )
-
-        # --------------------------------------------------------
-        # OUTPUT
-        # --------------------------------------------------------
-
-        self.output = nn.Conv3d(
-            32,
-            1,
-            kernel_size=1,
-        )
-
-    def forward(
-        self,
-        x,
-    ):
-
-        # --------------------------------------------------------
-        # ENCODER
-        # --------------------------------------------------------
-
-        e1 = self.enc1(
-            x
-        )
-
-        e2 = self.enc2(
-            self.pool(e1)
-        )
-
-        e3 = self.enc3(
-            self.pool(e2)
-        )
-
-        e4 = self.enc4(
-            self.pool(e3)
-        )
-
-        # --------------------------------------------------------
-        # BOTTLENECK
-        # --------------------------------------------------------
-
-        b = self.bottleneck(
-            self.pool(e4)
-        )
-
-        # --------------------------------------------------------
-        # DECODER
-        # --------------------------------------------------------
-
-        d4 = self.up4(
-            b
-        )
-
-        d4 = torch.cat(
-            [
-                d4,
-                e4,
-            ],
-            dim=1,
-        )
-
-        d4 = self.dec4(
-            d4
-        )
-
-        d3 = self.up3(
-            d4
-        )
-
-        d3 = torch.cat(
-            [
-                d3,
-                e3,
-            ],
-            dim=1,
-        )
-
-        d3 = self.dec3(
-            d3
-        )
-
-        d2 = self.up2(
-            d3
-        )
-
-        d2 = torch.cat(
-            [
-                d2,
-                e2,
-            ],
-            dim=1,
-        )
-
-        d2 = self.dec2(
-            d2
-        )
-
-        d1 = self.up1(
-            d2
-        )
-
-        d1 = torch.cat(
-            [
-                d1,
-                e1,
-            ],
-            dim=1,
-        )
-
-        d1 = self.dec1(
-            d1
-        )
-
-        return self.output(
-            d1
-        )
-
-
-# ================================================================
-# MODEL DOWNLOAD
-# ================================================================
-
-
-@st.cache_resource(
-    show_spinner=False
+CLASS_TO_IDX = {
+    "glioma": 0,
+    "meningioma": 1,
+    "pituitary": 2,
+    "notumor": 3,
+}
+
+
+# ============================================================
+# DEVICE
+# ============================================================
+
+DEVICE = torch.device(
+    "cuda"
+    if torch.cuda.is_available()
+    else "cpu"
 )
-def _download_model():
 
-    cache_dir = os.path.join(
-        tempfile.gettempdir(),
-        "mammosense_brain",
-    )
 
-    os.makedirs(
-        cache_dir,
-        exist_ok=True,
-    )
+# ============================================================
+# GLOBAL MODEL
+# ============================================================
 
-    model_path = os.path.join(
-        cache_dir,
-        "mammosense_brain_v31_best.pt",
-    )
+_model = None
 
-    if not os.path.exists(
-        model_path
-    ):
 
-        try:
+# ============================================================
+# IMAGE TRANSFORMATION
+# ============================================================
 
-            urllib.request.urlretrieve(
-                HF_MODEL_URL,
-                model_path,
+transform = transforms.Compose(
+    [
+        transforms.Resize(
+            (
+                IMAGE_SIZE,
+                IMAGE_SIZE,
             )
+        ),
 
-        except Exception as error:
+        transforms.ToTensor(),
 
-            if os.path.exists(
-                model_path
-            ):
-
-                try:
-                    os.remove(
-                        model_path
-                    )
-                except Exception:
-                    pass
-
-            raise RuntimeError(
-                "Unable to download the "
-                "MammoSense Brain V3.1 checkpoint "
-                "from Hugging Face."
-            ) from error
-
-    if not os.path.isfile(
-        model_path
-    ):
-
-        raise RuntimeError(
-            "Brain tumor model file "
-            "was not created."
-        )
-
-    if os.path.getsize(
-        model_path
-    ) < 1024:
-
-        raise RuntimeError(
-            "Downloaded Brain V3.1 checkpoint "
-            "appears to be invalid or incomplete."
-        )
-
-    return model_path
-
-
-# ================================================================
-# LOAD MODEL
-# ================================================================
-
-
-@st.cache_resource(
-    show_spinner=False
+        transforms.Normalize(
+            mean=[
+                0.485,
+                0.456,
+                0.406,
+            ],
+            std=[
+                0.229,
+                0.224,
+                0.225,
+            ],
+        ),
+    ]
 )
+
+
+# ============================================================
+# BUILD MODEL
+# ============================================================
+
+def build_model():
+
+    # --------------------------------------------------------
+    # ResNet-50
+    #
+    # The checkpoint contains:
+    #
+    # layer1 -> 3 blocks
+    # layer2 -> 4 blocks
+    # layer3 -> 6 blocks
+    # layer4 -> 3 blocks
+    #
+    # This matches ResNet-50.
+    # --------------------------------------------------------
+
+    model = models.resnet50(
+        weights=None
+    )
+
+    # --------------------------------------------------------
+    # IMPORTANT
+    #
+    # Checkpoint:
+    #
+    # fc.1.weight -> (4, 2048)
+    # fc.1.bias   -> (4,)
+    #
+    # Therefore the original classifier was a Sequential
+    # module whose final Linear layer was fc.1.
+    # --------------------------------------------------------
+
+    model.fc = nn.Sequential(
+        nn.Dropout(
+            p=0.5
+        ),
+        nn.Linear(
+            2048,
+            4
+        ),
+    )
+
+    return model
+
+
+# ============================================================
+# LOAD MODEL
+# ============================================================
+
 def load_model():
 
-    model_path = _download_model()
+    global _model
 
-    model = UNet3D()
+    if _model is not None:
 
-    try:
+        return _model
 
-        checkpoint = torch.load(
-            model_path,
-            map_location=DEVICE,
-            weights_only=False,
-        )
 
-    except TypeError:
+    # --------------------------------------------------------
+    # DOWNLOAD CHECKPOINT
+    # --------------------------------------------------------
 
-        checkpoint = torch.load(
-            model_path,
-            map_location=DEVICE,
-        )
+    model_path = hf_hub_download(
+        repo_id=REPO_ID,
+        filename=MODEL_FILENAME,
+    )
 
-    except Exception as error:
 
-        raise RuntimeError(
-            "Unable to load the "
-            "MammoSense Brain V3.1 checkpoint."
-        ) from error
+    # --------------------------------------------------------
+    # LOAD CHECKPOINT
+    # --------------------------------------------------------
+
+    checkpoint = torch.load(
+        model_path,
+        map_location=DEVICE,
+        weights_only=False,
+    )
+
+
+    # --------------------------------------------------------
+    # CHECK CHECKPOINT
+    # --------------------------------------------------------
 
     if not isinstance(
         checkpoint,
@@ -494,1059 +202,336 @@ def load_model():
     ):
 
         raise RuntimeError(
-            "Invalid MammoSense Brain checkpoint. "
-            "Expected a checkpoint dictionary."
+            "Invalid Brain MRI checkpoint. "
+            "Expected a dictionary."
         )
 
-    if (
+
+    # --------------------------------------------------------
+    # EXTRACT STATE DICTIONARY
+    # --------------------------------------------------------
+
+    state_dict = checkpoint.get(
         "model_state_dict"
-        not in checkpoint
-    ):
-
-        raise RuntimeError(
-            "Checkpoint does not contain "
-            "'model_state_dict'."
-        )
-
-    state_dict = (
-        checkpoint[
-            "model_state_dict"
-        ]
     )
 
-    if not isinstance(
-        state_dict,
-        dict,
-    ):
+    if state_dict is None:
+
+        state_dict = checkpoint.get(
+            "state_dict"
+        )
+
+
+    if state_dict is None:
 
         raise RuntimeError(
-            "Invalid model_state_dict "
-            "inside Brain V3.1 checkpoint."
+            "Brain MRI checkpoint does not "
+            "contain model_state_dict."
         )
+
+
+    # --------------------------------------------------------
+    # REMOVE POSSIBLE PREFIXES
+    # --------------------------------------------------------
+
+    cleaned_state_dict = {}
+
+    for key, value in state_dict.items():
+
+        new_key = key
+
+        if new_key.startswith(
+            "module."
+        ):
+
+            new_key = new_key[
+                len("module.") :
+            ]
+
+        if new_key.startswith(
+            "model."
+        ):
+
+            new_key = new_key[
+                len("model.") :
+            ]
+
+        cleaned_state_dict[
+            new_key
+        ] = value
+
+
+    # --------------------------------------------------------
+    # BUILD ARCHITECTURE
+    # --------------------------------------------------------
+
+    model = build_model()
+
+
+    # --------------------------------------------------------
+    # LOAD WEIGHTS
+    # --------------------------------------------------------
 
     try:
 
         model.load_state_dict(
-            state_dict,
+            cleaned_state_dict,
             strict=True,
         )
 
-    except Exception as error:
+    except RuntimeError as error:
 
         raise RuntimeError(
-            "Brain V3.1 checkpoint architecture "
-            "does not match the expected 3D U-Net."
-        ) from error
+            "Brain MRI model architecture "
+            "does not match the checkpoint.\n\n"
+            f"{error}"
+        )
 
-    model.to(
+
+    # --------------------------------------------------------
+    # DEVICE
+    # --------------------------------------------------------
+
+    model = model.to(
         DEVICE
     )
 
+
+    # --------------------------------------------------------
+    # EVALUATION MODE
+    # --------------------------------------------------------
+
     model.eval()
 
-    return model
 
+    # --------------------------------------------------------
+    # STORE GLOBAL MODEL
+    # --------------------------------------------------------
 
-# ================================================================
-# NIFTI LOADING
-# ================================================================
+    _model = model
 
 
-def load_nifti(
-    file_bytes,
-):
+    return _model
 
-    if file_bytes is None:
 
-        raise ValueError(
-            "No NIfTI file was provided."
-        )
+# ============================================================
+# PREPARE IMAGE
+# ============================================================
 
-    if not file_bytes:
+def prepare_image(image):
 
-        raise ValueError(
-            "Empty NIfTI file."
-        )
+    # --------------------------------------------------------
+    # ACCEPT PIL IMAGE
+    # --------------------------------------------------------
 
-    temp_path = None
-
-    try:
-
-        with tempfile.NamedTemporaryFile(
-            suffix=".nii.gz",
-            delete=False,
-        ) as tmp:
-
-            tmp.write(
-                file_bytes
-            )
-
-            temp_path = tmp.name
-
-        nii = nib.load(
-            temp_path
-        )
-
-        volume = nii.get_fdata(
-            dtype=np.float32
-        )
-
-        volume = np.asarray(
-            volume,
-            dtype=np.float32,
-        )
-
-    except Exception as error:
-
-        raise ValueError(
-            "Unable to read the uploaded "
-            "NIfTI file."
-        ) from error
-
-    finally:
-
-        if temp_path is not None:
-
-            try:
-
-                os.remove(
-                    temp_path
-                )
-
-            except Exception:
-                pass
-
-    if volume.ndim != 3:
-
-        raise ValueError(
-            "Expected a 3D NIfTI volume. "
-            f"Received shape {volume.shape}."
-        )
-
-    if not np.isfinite(
-        volume
-    ).any():
-
-        raise ValueError(
-            "NIfTI volume contains no "
-            "valid numerical values."
-        )
-
-    return volume
-
-
-# ================================================================
-# MRI NORMALIZATION
-#
-# EXACT NORMALIZATION USED DURING TRAINING
-# ================================================================
-
-
-def normalize_mri(
-    volume,
-):
-
-    volume = np.nan_to_num(
-        volume,
-        nan=0.0,
-        posinf=0.0,
-        neginf=0.0,
-    )
-
-    nonzero = volume[
-        volume != 0
-    ]
-
-    if nonzero.size == 0:
-
-        return np.zeros_like(
-            volume,
-            dtype=np.float32,
-        )
-
-    mean = np.mean(
-        nonzero
-    )
-
-    std = np.std(
-        nonzero
-    )
-
-    if std < 1e-6:
-
-        return np.zeros_like(
-            volume,
-            dtype=np.float32,
-        )
-
-    volume = (
-        volume - mean
-    ) / std
-
-    volume = np.clip(
-        volume,
-        -5.0,
-        5.0,
-    )
-
-    return volume.astype(
-        np.float32
-    )
-
-
-# ================================================================
-# RESIZE MRI
-#
-# EXACT RESAMPLING USED DURING TRAINING
-# ================================================================
-
-
-def resize_volume(
-    volume,
-    target_shape=IMAGE_SHAPE,
-):
-
-    if volume.ndim != 3:
-
-        raise ValueError(
-            "MRI volume must be 3-dimensional."
-        )
-
-    if any(
-        dimension <= 0
-        for dimension in volume.shape
-    ):
-
-        raise ValueError(
-            "MRI volume has an invalid shape."
-        )
-
-    factors = [
-        target_shape[i]
-        / volume.shape[i]
-        for i in range(3)
-    ]
-
-    resized = zoom(
-        volume,
-        factors,
-        order=1,
-    )
-
-    resized = np.asarray(
-        resized,
-        dtype=np.float32,
-    )
-
-    if resized.shape != target_shape:
-
-        resized = zoom(
-            resized,
-            [
-                target_shape[i]
-                / resized.shape[i]
-                for i in range(3)
-            ],
-            order=1,
-        )
-
-    return resized.astype(
-        np.float32
-    )
-
-
-# ================================================================
-# PREPARE FOUR MRI MODALITIES
-# ================================================================
-
-
-def prepare_volume(
-    t1_bytes,
-    t1ce_bytes,
-    t2_bytes,
-    flair_bytes,
-):
-
-    files = [
-        (
-            "T1",
-            t1_bytes,
-        ),
-        (
-            "T1CE",
-            t1ce_bytes,
-        ),
-        (
-            "T2",
-            t2_bytes,
-        ),
-        (
-            "FLAIR",
-            flair_bytes,
-        ),
-    ]
-
-    channels = []
-
-    original_shapes = {}
-
-    for name, file_bytes in files:
-
-        if file_bytes is None:
-
-            raise ValueError(
-                f"{name} MRI file is required."
-            )
-
-        volume = load_nifti(
-            file_bytes
-        )
-
-        original_shapes[
-            name
-        ] = list(
-            volume.shape
-        )
-
-        volume = normalize_mri(
-            volume
-        )
-
-        volume = resize_volume(
-            volume,
-            IMAGE_SHAPE,
-        )
-
-        channels.append(
-            volume
-        )
-
-    image = np.stack(
-        channels,
-        axis=0,
-    )
-
-    if image.shape != (
-        4,
-        96,
-        96,
-        96,
-    ):
-
-        raise RuntimeError(
-            "Prepared MRI tensor has an "
-            "unexpected shape: "
-            f"{image.shape}"
-        )
-
-    image = torch.from_numpy(
-        image
-    ).float()
-
-    image = image.unsqueeze(
-        0
-    )
-
-    return (
+    if isinstance(
         image,
-        original_shapes,
-    )
+        Image.Image,
+    ):
+
+        pil_image = image
 
 
-# ================================================================
-# CONNECTED COMPONENT ANALYSIS
-# ================================================================
+    # --------------------------------------------------------
+    # ACCEPT FILE PATH
+    # --------------------------------------------------------
 
+    elif isinstance(
+        image,
+        str,
+    ):
 
-def analyze_segmentation(
-    mask,
-):
-
-    mask = (
-        mask > 0
-    ).astype(
-        np.uint8
-    )
-
-    tumor_voxels = int(
-        mask.sum()
-    )
-
-    total_voxels = int(
-        mask.size
-    )
-
-    tumor_fraction = (
-        tumor_voxels
-        / max(
-            total_voxels,
-            1,
-        )
-    )
-
-    tumor_percentage = (
-        tumor_fraction
-        * 100.0
-    )
-
-    # ------------------------------------------------------------
-    # Connected components
-    # ------------------------------------------------------------
-
-    connected_mask, number_of_regions = label(
-        mask
-    )
-
-    if number_of_regions > 0:
-
-        region_sizes = np.bincount(
-            connected_mask.ravel()
-        )
-
-        if region_sizes.size > 0:
-
-            region_sizes[0] = 0
-
-        largest_region_voxels = int(
-            region_sizes.max()
-        )
-
-    else:
-
-        largest_region_voxels = 0
-
-    # ------------------------------------------------------------
-    # Detection decision
-    # ------------------------------------------------------------
-
-    tumor_detected = (
-        tumor_fraction
-        >= MIN_TUMOR_FRACTION
-        and
-        largest_region_voxels
-        >= MIN_CONNECTED_VOXELS
-    )
-
-    return {
-        "tumor_voxels": tumor_voxels,
-
-        "total_voxels": total_voxels,
-
-        "tumor_fraction": (
-            tumor_fraction
-        ),
-
-        "tumor_percentage": (
-            tumor_percentage
-        ),
-
-        "number_of_regions": (
-            int(number_of_regions)
-        ),
-
-        "largest_region_voxels": (
-            largest_region_voxels
-        ),
-
-        "tumor_detected": (
-            bool(tumor_detected)
-        ),
-    }
-
-
-# ================================================================
-# PREDICTION
-# ================================================================
-
-
-@torch.no_grad()
-def predict(
-    t1_bytes,
-    t1ce_bytes,
-    t2_bytes,
-    flair_bytes,
-):
-
-    model = load_model()
-
-    image, original_shapes = (
-        prepare_volume(
-            t1_bytes,
-            t1ce_bytes,
-            t2_bytes,
-            flair_bytes,
-        )
-    )
-
-    image = image.to(
-        DEVICE,
-        non_blocking=True,
-    )
-
-    # ------------------------------------------------------------
-    # MODEL INFERENCE
-    # ------------------------------------------------------------
-
-    if DEVICE.type == "cuda":
-
-        with torch.autocast(
-            device_type="cuda",
-            dtype=torch.float16,
+        if not os.path.exists(
+            image
         ):
 
-            logits = model(
-                image
+            raise FileNotFoundError(
+                f"Image not found: {image}"
             )
 
-    else:
-
-        logits = model(
+        pil_image = Image.open(
             image
         )
 
-    # ------------------------------------------------------------
-    # PROBABILITY
-    # ------------------------------------------------------------
 
-    probabilities = torch.sigmoid(
-        logits
-    )
+    # --------------------------------------------------------
+    # ACCEPT BYTES
+    # --------------------------------------------------------
 
-    probability_volume = (
-        probabilities[
-            0,
-            0,
-        ]
-        .float()
-        .cpu()
-        .numpy()
-    )
+    elif isinstance(
+        image,
+        bytes,
+    ):
 
-    probability_volume = np.nan_to_num(
-        probability_volume,
-        nan=0.0,
-        posinf=1.0,
-        neginf=0.0,
-    )
+        import io
 
-    probability_volume = np.clip(
-        probability_volume,
-        0.0,
-        1.0,
-    )
-
-    # ------------------------------------------------------------
-    # BINARY MASK
-    # ------------------------------------------------------------
-
-    mask = (
-        probability_volume
-        >= SEGMENTATION_THRESHOLD
-    ).astype(
-        np.uint8
-    )
-
-    # ------------------------------------------------------------
-    # SEGMENTATION ANALYSIS
-    # ------------------------------------------------------------
-
-    segmentation = (
-        analyze_segmentation(
-            mask
+        pil_image = Image.open(
+            io.BytesIO(
+                image
+            )
         )
-    )
 
-    tumor_voxels = (
-        segmentation[
-            "tumor_voxels"
-        ]
-    )
-
-    total_voxels = (
-        segmentation[
-            "total_voxels"
-        ]
-    )
-
-    tumor_fraction = (
-        segmentation[
-            "tumor_fraction"
-        ]
-    )
-
-    tumor_percentage = (
-        segmentation[
-            "tumor_percentage"
-        ]
-    )
-
-    number_of_regions = (
-        segmentation[
-            "number_of_regions"
-        ]
-    )
-
-    largest_region_voxels = (
-        segmentation[
-            "largest_region_voxels"
-        ]
-    )
-
-    tumor_detected = (
-        segmentation[
-            "tumor_detected"
-        ]
-    )
-
-    # ------------------------------------------------------------
-    # PROBABILITY STATISTICS
-    # ------------------------------------------------------------
-
-    positive_probabilities = (
-        probability_volume[
-            mask == 1
-        ]
-    )
-
-    if positive_probabilities.size > 0:
-
-        confidence = float(
-            positive_probabilities.mean()
-        )
 
     else:
 
-        confidence = float(
-            1.0
-            - probability_volume.mean()
+        raise TypeError(
+            "Brain MRI input must be "
+            "a PIL Image, file path, "
+            "or image bytes."
         )
+
+
+    # --------------------------------------------------------
+    # CONVERT TO RGB
+    # --------------------------------------------------------
+
+    pil_image = pil_image.convert(
+        "RGB"
+    )
+
+
+    # --------------------------------------------------------
+    # TRANSFORM
+    # --------------------------------------------------------
+
+    tensor = transform(
+        pil_image
+    )
+
+
+    # --------------------------------------------------------
+    # ADD BATCH DIMENSION
+    #
+    # [3,224,224]
+    #
+    # becomes
+    #
+    # [1,3,224,224]
+    # --------------------------------------------------------
+
+    tensor = tensor.unsqueeze(
+        0
+    )
+
+
+    return tensor.to(
+        DEVICE
+    )
+
+
+# ============================================================
+# PREDICTION
+# ============================================================
+
+def predict(image):
+
+    # --------------------------------------------------------
+    # LOAD MODEL
+    # --------------------------------------------------------
+
+    model = load_model()
+
+
+    # --------------------------------------------------------
+    # PREPARE IMAGE
+    # --------------------------------------------------------
+
+    tensor = prepare_image(
+        image
+    )
+
+
+    # --------------------------------------------------------
+    # INFERENCE
+    # --------------------------------------------------------
+
+    with torch.no_grad():
+
+        logits = model(
+            tensor
+        )
+
+
+        # ----------------------------------------------------
+        # SOFTMAX
+        # ----------------------------------------------------
+
+        probabilities = torch.softmax(
+            logits,
+            dim=1,
+        )
+
+
+        # ----------------------------------------------------
+        # BEST CLASS
+        # ----------------------------------------------------
+
+        confidence, predicted_idx = (
+            torch.max(
+                probabilities,
+                dim=1,
+            )
+        )
+
+
+    # --------------------------------------------------------
+    # CONVERT VALUES
+    # --------------------------------------------------------
+
+    predicted_idx = int(
+        predicted_idx.item()
+    )
 
     confidence = float(
-        np.clip(
-            confidence,
-            0.0,
-            1.0,
-        )
+        confidence.item()
     )
 
-    maximum_probability = float(
-        probability_volume.max()
-    )
 
-    mean_probability = float(
-        probability_volume.mean()
-    )
+    # --------------------------------------------------------
+    # PREDICTION LABEL
+    # --------------------------------------------------------
 
-    # ------------------------------------------------------------
-    # HUMAN-READABLE RESULT
-    # ------------------------------------------------------------
+    prediction = CLASS_NAMES[
+        predicted_idx
+    ]
 
-    if tumor_detected:
 
-        prediction = (
-            "TUMOR DETECTED"
+    # --------------------------------------------------------
+    # PROBABILITY BREAKDOWN
+    # --------------------------------------------------------
+
+    probability_dict = {}
+
+    for idx, class_name in enumerate(
+        CLASS_NAMES
+    ):
+
+        probability_dict[
+            class_name
+        ] = float(
+            probabilities[
+                0,
+                idx,
+            ].item()
         )
 
-    else:
 
-        prediction = (
-            "NO SIGNIFICANT "
-            "TUMOR SEGMENTATION"
-        )
-
-    # ------------------------------------------------------------
-    # RETURN
-    # ------------------------------------------------------------
+    # ========================================================
+    # RETURN RESULT
+    # ========================================================
 
     return {
-
-        # --------------------------------------------------------
-        # PRIMARY RESULT
-        # --------------------------------------------------------
-
         "prediction": prediction,
 
         "confidence": confidence,
 
-        "confidence_percentage": (
-            confidence * 100.0
-        ),
+        "probabilities": probability_dict,
 
-        "tumor_detected": (
-            bool(tumor_detected)
-        ),
+        "class_index": predicted_idx,
 
-        # --------------------------------------------------------
-        # SEGMENTATION
-        # --------------------------------------------------------
+        "model": "MammoSense Brain V3.1",
 
-        "tumor_voxels": (
-            tumor_voxels
-        ),
+        "architecture": "ResNet-50",
 
-        "total_voxels": (
-            total_voxels
-        ),
-
-        "tumor_fraction": (
-            tumor_fraction
-        ),
-
-        "tumor_percentage": (
-            tumor_percentage
-        ),
-
-        "number_of_regions": (
-            number_of_regions
-        ),
-
-        "largest_region_voxels": (
-            largest_region_voxels
-        ),
-
-        # --------------------------------------------------------
-        # PROBABILITY
-        # --------------------------------------------------------
-
-        "maximum_probability": (
-            maximum_probability
-        ),
-
-        "mean_probability": (
-            mean_probability
-        ),
-
-        # --------------------------------------------------------
-        # RAW OUTPUTS
-        # --------------------------------------------------------
-
-        "mask": mask,
-
-        "probability_volume": (
-            probability_volume
-        ),
-
-        # --------------------------------------------------------
-        # INPUT INFORMATION
-        # --------------------------------------------------------
-
-        "original_shapes": (
-            original_shapes
-        ),
-
-        "input_shape": list(
-            IMAGE_SHAPE
-        ),
-
-        "input_modalities": (
-            INPUT_MODALITIES.copy()
-        ),
-
-        # --------------------------------------------------------
-        # MODEL INFORMATION
-        # --------------------------------------------------------
-
-        "model": MODEL_NAME,
-
-        "architecture": ARCHITECTURE,
-
-        "dataset": (
-            "BraTS 2021"
-        ),
-
-        "huggingface_repo": (
-            HF_REPO
-        ),
-
-        # --------------------------------------------------------
-        # THRESHOLDS
-        # --------------------------------------------------------
-
-        "segmentation_threshold": (
-            SEGMENTATION_THRESHOLD
-        ),
-
-        "minimum_tumor_fraction": (
-            MIN_TUMOR_FRACTION
-        ),
-
-        "minimum_connected_voxels": (
-            MIN_CONNECTED_VOXELS
-        ),
-
-        # --------------------------------------------------------
-        # HARDWARE
-        # --------------------------------------------------------
-
-        "device": str(
-            DEVICE
-        ),
-    }
-
-
-# ================================================================
-# REPRESENTATIVE MRI SLICE + TUMOR OVERLAY
-# ================================================================
-
-
-def create_overlay(
-    flair_bytes,
-    mask,
-):
-
-    if mask is None:
-
-        raise ValueError(
-            "Segmentation mask is required."
-        )
-
-    mask = np.asarray(
-        mask
-    )
-
-    if mask.ndim != 3:
-
-        raise ValueError(
-            "Segmentation mask must be 3-dimensional."
-        )
-
-    flair = load_nifti(
-        flair_bytes
-    )
-
-    flair = normalize_mri(
-        flair
-    )
-
-    flair = resize_volume(
-        flair,
-        IMAGE_SHAPE,
-    )
-
-    mask = resize_mask_for_overlay(
-        mask,
-        IMAGE_SHAPE,
-    )
-
-    # ------------------------------------------------------------
-    # Middle axial slice
-    # ------------------------------------------------------------
-
-    slice_index = (
-        flair.shape[2] // 2
-    )
-
-    image_slice = flair[
-        :,
-        :,
-        slice_index,
-    ]
-
-    mask_slice = mask[
-        :,
-        :,
-        slice_index,
-    ]
-
-    image_slice = np.nan_to_num(
-        image_slice,
-        nan=0.0,
-        posinf=0.0,
-        neginf=0.0,
-    )
-
-    # ------------------------------------------------------------
-    # Normalize for display
-    # ------------------------------------------------------------
-
-    min_value = float(
-        image_slice.min()
-    )
-
-    max_value = float(
-        image_slice.max()
-    )
-
-    if max_value > min_value:
-
-        normalized = (
-            image_slice
-            - min_value
-        ) / (
-            max_value
-            - min_value
-        )
-
-    else:
-
-        normalized = np.zeros_like(
-            image_slice,
-            dtype=np.float32,
-        )
-
-    grayscale = (
-        normalized
-        * 255.0
-    ).clip(
-        0,
-        255,
-    ).astype(
-        np.uint8
-    )
-
-    # ------------------------------------------------------------
-    # Base image
-    # ------------------------------------------------------------
-
-    base = Image.fromarray(
-        grayscale,
-        mode="L",
-    ).convert(
-        "RGBA"
-    )
-
-    rgba = np.array(
-        base
-    )
-
-    tumor = (
-        mask_slice > 0
-    )
-
-    # ------------------------------------------------------------
-    # Tumor overlay
-    # ------------------------------------------------------------
-
-    rgba[
-        tumor,
-        0
-    ] = 255
-
-    rgba[
-        tumor,
-        1
-    ] = 40
-
-    rgba[
-        tumor,
-        2
-    ] = 40
-
-    rgba[
-        tumor,
-        3
-    ] = 210
-
-    overlay = Image.fromarray(
-        rgba,
-        mode="RGBA",
-    )
-
-    # ------------------------------------------------------------
-    # PNG buffer
-    # ------------------------------------------------------------
-
-    buffer = io.BytesIO()
-
-    overlay.save(
-        buffer,
-        format="PNG",
-    )
-
-    buffer.seek(0)
-
-    return buffer.getvalue()
-
-
-# ================================================================
-# MASK RESIZING FOR VISUALIZATION
-# ================================================================
-
-
-def resize_mask_for_overlay(
-    mask,
-    target_shape=IMAGE_SHAPE,
-):
-
-    if mask.ndim != 3:
-
-        raise ValueError(
-            "Mask must be 3-dimensional."
-        )
-
-    if tuple(
-        mask.shape
-    ) == tuple(
-        target_shape
-    ):
-
-        return (
-            mask > 0
-        ).astype(
-            np.uint8
-        )
-
-    factors = [
-        target_shape[i]
-        / mask.shape[i]
-        for i in range(3)
-    ]
-
-    resized = zoom(
-        mask.astype(
-            np.uint8
-        ),
-        factors,
-        order=0,
-    )
-
-    if resized.shape != target_shape:
-
-        resized = zoom(
-            resized,
-            [
-                target_shape[i]
-                / resized.shape[i]
-                for i in range(3)
-            ],
-            order=0,
-        )
-
-    return (
-        resized > 0
-    ).astype(
-        np.uint8
-    )
-
-
-# ================================================================
-# MODEL INFORMATION HELPER
-# ================================================================
-
-
-def get_model_info():
-
-    return {
-        "model": MODEL_NAME,
-        "architecture": ARCHITECTURE,
-        "dataset": "BraTS 2021",
-        "huggingface_repo": HF_REPO,
-        "input_modalities": (
-            INPUT_MODALITIES.copy()
-        ),
-        "input_shape": list(
-            IMAGE_SHAPE
-        ),
-        "device": str(
-            DEVICE
-        ),
-        "segmentation_threshold": (
-            SEGMENTATION_THRESHOLD
-        ),
-        "minimum_tumor_fraction": (
-            MIN_TUMOR_FRACTION
-        ),
-        "minimum_connected_voxels": (
-            MIN_CONNECTED_VOXELS
-        ),
+        "image_size": IMAGE_SIZE,
     }
