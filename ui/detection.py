@@ -6,17 +6,16 @@
 #   1. MammoSense Breast Ultrasound
 #   2. MammoSense Pneumonia
 #   3. MammoSense Tuberculosis
-#   4. MammoSense Brain V3.1
+#   4. MammoSense Brain MRI
 #
-# Brain V3.1:
-#   T1
-#   T1CE
-#   T2
-#   FLAIR
+# Brain MRI:
+#   2D ResNet-50 image classifier
 #
-# IMPORTANT:
-# Brain model is imported lazily so missing Brain MRI
-# dependencies cannot crash the entire Medusa application.
+# Classes:
+#   glioma
+#   meningioma
+#   pituitary
+#   notumor
 # ============================================================
 
 import io
@@ -479,7 +478,7 @@ def show_detection():
     elif brain_tumor:
 
         model_name = (
-            "MammoSense Brain V3.1"
+            "MammoSense Brain MRI"
         )
 
     else:
@@ -494,114 +493,165 @@ def show_detection():
     )
 
     # ========================================================
-    # BRAIN MRI
+    # STANDARD MEDICAL IMAGE UPLOAD
     # ========================================================
 
-    if brain_tumor:
+    uploaded = st.file_uploader(
+        "Upload medical image",
+        type=[
+            "jpg",
+            "jpeg",
+            "png",
+            "webp",
+        ],
+        key="medical_scan_upload",
+    )
 
-        st.subheader(
-            "Brain MRI Upload"
+    if uploaded:
+
+        image_bytes = uploaded.getvalue()
+
+        st.session_state.scan_image_bytes = (
+            image_bytes
         )
 
-        st.info(
-            "MammoSense Brain V3.1 requires four "
-            "3D MRI volumes: T1, T1CE, T2 and FLAIR."
+        st.session_state.scan_filename = (
+            uploaded.name
         )
 
-        t1_file = st.file_uploader(
-            "T1 MRI",
-            type=[
-                "nii",
-                "gz",
-            ],
-            key="brain_t1_upload",
+    else:
+
+        image_bytes = (
+            st.session_state.scan_image_bytes
         )
 
-        t1ce_file = st.file_uploader(
-            "T1CE MRI",
-            type=[
-                "nii",
-                "gz",
-            ],
-            key="brain_t1ce_upload",
+    if not image_bytes:
+
+        st.warning(
+            "Upload an image to continue."
         )
 
-        t2_file = st.file_uploader(
-            "T2 MRI",
-            type=[
-                "nii",
-                "gz",
-            ],
-            key="brain_t2_upload",
+        return
+
+    # --------------------------------------------------------
+    # OPEN IMAGE
+    # --------------------------------------------------------
+
+    try:
+
+        image = Image.open(
+            io.BytesIO(
+                image_bytes
+            )
+        ).convert("RGB")
+
+        st.image(
+            image,
+            caption=examination,
+            use_container_width=True,
         )
 
-        flair_file = st.file_uploader(
-            "FLAIR MRI",
-            type=[
-                "nii",
-                "gz",
-            ],
-            key="brain_flair_upload",
+    except Exception as error:
+
+        st.error(
+            "The uploaded image could "
+            "not be opened."
         )
 
-        if not all(
-            [
-                t1_file,
-                t1ce_file,
-                t2_file,
-                flair_file,
-            ]
+        with st.expander(
+            "Technical details"
         ):
 
-            st.warning(
-                "Upload all four MRI volumes "
-                "before continuing."
+            st.exception(error)
+
+        return
+
+    # ====================================================
+    # AI ANALYSIS
+    # ====================================================
+
+    if st.button(
+        "Analyze Examination",
+        type="primary",
+        use_container_width=True,
+        key="analyze_medical_scan",
+    ):
+
+        # ------------------------------------------------
+        # PATIENT VALIDATION
+        # ------------------------------------------------
+
+        if not patient_name:
+
+            st.error(
+                "Enter the patient's full name first."
             )
 
             return
 
-        # ----------------------------------------------------
-        # ANALYZE BRAIN MRI
-        # ----------------------------------------------------
+        # ------------------------------------------------
+        # USER VALIDATION
+        # ------------------------------------------------
 
-        if st.button(
-            "Analyze Brain MRI",
-            type="primary",
-            use_container_width=True,
-            key="analyze_brain_mri",
-        ):
+        user = current_user()
 
-            if not patient_name:
+        if not user:
 
-                st.error(
-                    "Enter the patient's full name first."
-                )
+            st.error(
+                "Your login session has expired."
+            )
 
-                return
+            return
 
-            user = current_user()
+        try:
 
-            if not user:
+            with st.spinner(
+                "Medusa AI is analyzing..."
+            ):
 
-                st.error(
-                    "Your login session has expired."
-                )
+                # ========================================
+                # PNEUMONIA
+                # ========================================
 
-                return
+                if pneumonia:
 
-            try:
+                    from ai.pneumonia import (
+                        load_model as load_pneumonia_model,
+                        predict as predict_pneumonia,
+                    )
 
-                with st.spinner(
-                    "MammoSense Brain V3.1 "
-                    "is analyzing the MRI volumes..."
-                ):
+                    load_pneumonia_model()
 
-                    # ------------------------------------------------
-                    # LAZY IMPORT
-                    #
-                    # This prevents nibabel/scipy dependencies
-                    # from crashing Medusa when Brain MRI is not used.
-                    # ------------------------------------------------
+                    result = (
+                        predict_pneumonia(
+                            image
+                        )
+                    )
+
+                # ========================================
+                # TUBERCULOSIS
+                # ========================================
+
+                elif tuberculosis:
+
+                    from ai.tuberculosis import (
+                        load_model as load_tb_model,
+                        predict as predict_tb,
+                    )
+
+                    load_tb_model()
+
+                    result = (
+                        predict_tb(
+                            image
+                        )
+                    )
+
+                # ========================================
+                # BRAIN MRI
+                # ========================================
+
+                elif brain_tumor:
 
                     from ai.braintumor import (
                         load_model as load_brain_model,
@@ -610,374 +660,244 @@ def show_detection():
 
                     load_brain_model()
 
-                    result = predict_brain(
-                        t1_file.getvalue(),
-                        t1ce_file.getvalue(),
-                        t2_file.getvalue(),
-                        flair_file.getvalue(),
-                    )
-
-                # ----------------------------------------------------
-                # VALIDATE RESULT
-                # ----------------------------------------------------
-
-                if not isinstance(
-                    result,
-                    dict,
-                ):
-
-                    st.error(
-                        "The Brain AI model returned "
-                        "an invalid result."
-                    )
-
-                    return
-
-                if "prediction" not in result:
-
-                    st.error(
-                        "The Brain AI model did not "
-                        "return a prediction."
-                    )
-
-                    return
-
-                if "confidence" not in result:
-
-                    st.error(
-                        "The Brain AI model did not "
-                        "return a confidence score."
-                    )
-
-                    return
-
-                # ----------------------------------------------------
-                # DATABASE
-                # ----------------------------------------------------
-
-                sb = get_supabase()
-
-                # ----------------------------------------------------
-                # MRI STORAGE
-                #
-                # We store the four original MRI files separately.
-                # ----------------------------------------------------
-
-                patient_id = (
-                    st.session_state.patient_id
-                )
-
-                storage_base = (
-                    f"{user.id}/"
-                    f"{patient_id}/"
-                    f"{uuid.uuid4().hex}"
-                )
-
-                brain_files = [
-                    (
-                        "t1",
-                        t1_file,
-                        t1_file.getvalue(),
-                    ),
-                    (
-                        "t1ce",
-                        t1ce_file,
-                        t1ce_file.getvalue(),
-                    ),
-                    (
-                        "t2",
-                        t2_file,
-                        t2_file.getvalue(),
-                    ),
-                    (
-                        "flair",
-                        flair_file,
-                        flair_file.getvalue(),
-                    ),
-                ]
-
-                stored_paths = {}
-
-                for (
-                    modality,
-                    uploaded_file,
-                    file_data,
-                ) in brain_files:
-
-                    filename = (
-                        uploaded_file.name
-                    )
-
-                    if "." in filename:
-
-                        extension = (
-                            filename
-                            .rsplit(
-                                ".",
-                                1,
-                            )[-1]
-                            .lower()
-                        )
-
-                    else:
-
-                        extension = "nii"
-
-                    image_path = (
-                        f"{storage_base}/"
-                        f"{modality}."
-                        f"{extension}"
-                    )
-
-                    content_type = (
-                        uploaded_file.type
-                        or "application/octet-stream"
-                    )
-
-                    (
-                        sb
-                        .storage
-                        .from_(
-                            "mammosense-scans"
-                        )
-                        .upload(
-                            image_path,
-                            file_data,
-                            {
-                                "content-type":
-                                    content_type,
-                                "upsert":
-                                    "false",
-                            },
+                    result = (
+                        predict_brain(
+                            image
                         )
                     )
 
-                    stored_paths[
-                        modality
-                    ] = image_path
+                # ========================================
+                # BREAST ULTRASOUND
+                # ========================================
 
-                # ----------------------------------------------------
-                # PRIMARY IMAGE PATH
-                #
-                # Existing database schema appears to have one
-                # image_path field. Store the T1 path there while
-                # preserving all modality paths in probabilities/
-                # metadata only if supported by the database.
-                # ----------------------------------------------------
+                else:
 
-                primary_image_path = (
-                    stored_paths["t1"]
+                    from ai.mammosense import (
+                        load_model as load_mammo_model,
+                        predict as predict_mammo,
+                    )
+
+                    load_mammo_model()
+
+                    result = (
+                        predict_mammo(
+                            image
+                        )
+                    )
+
+            # =================================================
+            # VALIDATE MODEL RESULT
+            # =================================================
+
+            if not isinstance(
+                result,
+                dict,
+            ):
+
+                st.error(
+                    "The AI model returned "
+                    "an invalid result."
                 )
 
-                # ----------------------------------------------------
-                # PREPARE PROBABILITIES
-                # ----------------------------------------------------
+                return
 
-                probabilities = result.get(
-                    "probabilities",
-                    {},
+            if "prediction" not in result:
+
+                st.error(
+                    "The AI model did not "
+                    "return a prediction."
                 )
 
-                if not isinstance(
-                    probabilities,
-                    dict,
-                ):
+                return
 
-                    probabilities = {}
+            if "confidence" not in result:
 
-                # ----------------------------------------------------
-                # SAVE AI SCAN
-                # ----------------------------------------------------
+                st.error(
+                    "The AI model did not "
+                    "return a confidence score."
+                )
 
-                response = (
-                    sb
-                    .table("ai_scans")
-                    .insert(
-                        {
-                            "user_id":
-                                user.id,
+                return
 
-                            "patient_id":
-                                patient_id,
+            # =================================================
+            # SUPABASE
+            # =================================================
 
-                            "patient_name":
-                                patient_name,
+            sb = get_supabase()
 
-                            "patient_state":
-                                patient_state,
+            # =================================================
+            # IMAGE EXTENSION
+            # =================================================
 
-                            "examination":
-                                examination,
+            if uploaded:
 
-                            "model":
-                                model_name,
+                if "." in uploaded.name:
 
-                            "prediction":
+                    extension = (
+                        uploaded.name
+                        .rsplit(
+                            ".",
+                            1,
+                        )[-1]
+                        .lower()
+                    )
+
+                else:
+
+                    extension = "png"
+
+                content_type = (
+                    uploaded.type
+                    or "image/png"
+                )
+
+            else:
+
+                extension = "png"
+
+                content_type = (
+                    "image/png"
+                )
+
+            # =================================================
+            # STORAGE PATH
+            # =================================================
+
+            image_path = (
+                f"{user.id}/"
+                f"{st.session_state.patient_id}/"
+                f"{uuid.uuid4().hex}."
+                f"{extension}"
+            )
+
+            # =================================================
+            # UPLOAD IMAGE
+            # =================================================
+
+            (
+                sb
+                .storage
+                .from_(
+                    "mammosense-scans"
+                )
+                .upload(
+                    image_path,
+                    image_bytes,
+                    {
+                        "content-type":
+                            content_type,
+                        "upsert":
+                            "false",
+                    },
+                )
+            )
+
+            # =================================================
+            # PROBABILITIES
+            # =================================================
+
+            probabilities = result.get(
+                "probabilities",
+                {},
+            )
+
+            if not isinstance(
+                probabilities,
+                dict,
+            ):
+
+                probabilities = {}
+
+            # =================================================
+            # SAVE AI SCAN
+            # =================================================
+
+            response = (
+                sb
+                .table("ai_scans")
+                .insert(
+                    {
+                        "user_id":
+                            user.id,
+
+                        "patient_id":
+                            st.session_state.patient_id,
+
+                        "patient_name":
+                            patient_name,
+
+                        "patient_state":
+                            patient_state,
+
+                        "examination":
+                            examination,
+
+                        "model":
+                            model_name,
+
+                        "prediction":
+                            result.get(
+                                "prediction"
+                            ),
+
+                        "confidence":
+                            float(
                                 result.get(
-                                    "prediction"
-                                ),
+                                    "confidence",
+                                    0,
+                                )
+                            ),
 
-                            "confidence":
-                                float(
-                                    result.get(
-                                        "confidence",
-                                        0,
-                                    )
-                                ),
+                        "probabilities":
+                            probabilities,
 
-                            "probabilities":
-                                probabilities,
+                        "image_path":
+                            image_path,
 
-                            "image_path":
-                                primary_image_path,
-
-                            "status":
-                                "AI_COMPLETED",
-                        }
-                    )
-                    .execute()
+                        "status":
+                            "AI_COMPLETED",
+                    }
                 )
+                .execute()
+            )
 
-                if not response.data:
-
-                    st.error(
-                        "The Brain MRI scan "
-                        "could not be saved."
-                    )
-
-                    return
-
-                # ----------------------------------------------------
-                # SESSION STATE
-                # ----------------------------------------------------
-
-                st.session_state.scan_id = (
-                    response.data[0]["id"]
-                )
-
-                st.session_state.scan_result = (
-                    result
-                )
-
-                st.session_state.scan_image_bytes = None
-
-                st.session_state.scan_filename = (
-                    t1_file.name
-                )
-
-                st.session_state.review_status = (
-                    "NOT_REQUESTED"
-                )
-
-                st.session_state.review_id = None
-
-                st.success(
-                    "Brain MRI analysis completed."
-                )
-
-                st.rerun()
-
-            except ModuleNotFoundError as error:
+            if not response.data:
 
                 st.error(
-                    "Brain MRI dependencies are missing."
+                    "The scan could not be saved."
                 )
-
-                st.info(
-                    "Add nibabel and scipy to "
-                    "requirements.txt, then redeploy "
-                    "the application."
-                )
-
-                with st.expander(
-                    "Technical details"
-                ):
-
-                    st.exception(error)
 
                 return
 
-            except Exception as error:
+            # =================================================
+            # SESSION STATE
+            # =================================================
 
-                st.error(
-                    "The Brain MRI examination "
-                    "could not be analyzed."
-                )
-
-                with st.expander(
-                    "Technical details"
-                ):
-
-                    st.exception(error)
-
-                return
-
-    # ========================================================
-    # STANDARD MEDICAL IMAGE UPLOAD
-    # ========================================================
-
-    else:
-
-        uploaded = st.file_uploader(
-            "Upload medical image",
-            type=[
-                "jpg",
-                "jpeg",
-                "png",
-                "webp",
-            ],
-            key="medical_scan_upload",
-        )
-
-        if uploaded:
-
-            image_bytes = uploaded.getvalue()
-
-            st.session_state.scan_image_bytes = (
-                image_bytes
+            st.session_state.scan_id = (
+                response.data[0]["id"]
             )
 
-            st.session_state.scan_filename = (
-                uploaded.name
+            st.session_state.scan_result = (
+                result
             )
 
-        else:
-
-            image_bytes = (
-                st.session_state.scan_image_bytes
+            st.session_state.review_status = (
+                "NOT_REQUESTED"
             )
 
-        if not image_bytes:
+            st.session_state.review_id = None
 
-            st.warning(
-                "Upload an image to continue."
+            st.success(
+                "AI analysis completed."
             )
 
-            return
-
-        # ----------------------------------------------------
-        # OPEN IMAGE
-        # ----------------------------------------------------
-
-        try:
-
-            image = Image.open(
-                io.BytesIO(
-                    image_bytes
-                )
-            ).convert("RGB")
-
-            st.image(
-                image,
-                caption=examination,
-                use_container_width=True,
-            )
+            st.rerun()
 
         except Exception as error:
 
             st.error(
-                "The uploaded image could "
-                "not be opened."
+                "The examination could "
+                "not be analyzed."
             )
 
             with st.expander(
@@ -987,329 +907,6 @@ def show_detection():
                 st.exception(error)
 
             return
-
-        # ====================================================
-        # AI ANALYSIS
-        # ====================================================
-
-        if st.button(
-            "Analyze Examination",
-            type="primary",
-            use_container_width=True,
-            key="analyze_medical_scan",
-        ):
-
-            # ------------------------------------------------
-            # PATIENT VALIDATION
-            # ------------------------------------------------
-
-            if not patient_name:
-
-                st.error(
-                    "Enter the patient's full name first."
-                )
-
-                return
-
-            # ------------------------------------------------
-            # USER VALIDATION
-            # ------------------------------------------------
-
-            user = current_user()
-
-            if not user:
-
-                st.error(
-                    "Your login session has expired."
-                )
-
-                return
-
-            try:
-
-                with st.spinner(
-                    "Medusa AI is analyzing..."
-                ):
-
-                    # ============================================
-                    # PNEUMONIA
-                    # ============================================
-
-                    if pneumonia:
-
-                        from ai.pneumonia import (
-                            load_model as load_pneumonia_model,
-                            predict as predict_pneumonia,
-                        )
-
-                        load_pneumonia_model()
-
-                        result = (
-                            predict_pneumonia(
-                                image
-                            )
-                        )
-
-                    # ============================================
-                    # TUBERCULOSIS
-                    # ============================================
-
-                    elif tuberculosis:
-
-                        from ai.tuberculosis import (
-                            load_model as load_tb_model,
-                            predict as predict_tb,
-                        )
-
-                        load_tb_model()
-
-                        result = (
-                            predict_tb(
-                                image
-                            )
-                        )
-
-                    # ============================================
-                    # BREAST ULTRASOUND
-                    # ============================================
-
-                    else:
-
-                        from ai.mammosense import (
-                            load_model as load_mammo_model,
-                            predict as predict_mammo,
-                        )
-
-                        load_mammo_model()
-
-                        result = (
-                            predict_mammo(
-                                image
-                            )
-                        )
-
-                # =================================================
-                # VALIDATE MODEL RESULT
-                # =================================================
-
-                if not isinstance(
-                    result,
-                    dict,
-                ):
-
-                    st.error(
-                        "The AI model returned "
-                        "an invalid result."
-                    )
-
-                    return
-
-                if "prediction" not in result:
-
-                    st.error(
-                        "The AI model did not "
-                        "return a prediction."
-                    )
-
-                    return
-
-                if "confidence" not in result:
-
-                    st.error(
-                        "The AI model did not "
-                        "return a confidence score."
-                    )
-
-                    return
-
-                # =================================================
-                # SUPABASE
-                # =================================================
-
-                sb = get_supabase()
-
-                # =================================================
-                # IMAGE EXTENSION
-                # =================================================
-
-                if uploaded:
-
-                    if "." in uploaded.name:
-
-                        extension = (
-                            uploaded.name
-                            .rsplit(
-                                ".",
-                                1,
-                            )[-1]
-                            .lower()
-                        )
-
-                    else:
-
-                        extension = "png"
-
-                    content_type = (
-                        uploaded.type
-                        or "image/png"
-                    )
-
-                else:
-
-                    extension = "png"
-
-                    content_type = (
-                        "image/png"
-                    )
-
-                # =================================================
-                # STORAGE PATH
-                # =================================================
-
-                image_path = (
-                    f"{user.id}/"
-                    f"{st.session_state.patient_id}/"
-                    f"{uuid.uuid4().hex}."
-                    f"{extension}"
-                )
-
-                # =================================================
-                # UPLOAD IMAGE
-                # =================================================
-
-                (
-                    sb
-                    .storage
-                    .from_(
-                        "mammosense-scans"
-                    )
-                    .upload(
-                        image_path,
-                        image_bytes,
-                        {
-                            "content-type":
-                                content_type,
-                            "upsert":
-                                "false",
-                        },
-                    )
-                )
-
-                # =================================================
-                # PROBABILITIES
-                # =================================================
-
-                probabilities = result.get(
-                    "probabilities",
-                    {},
-                )
-
-                if not isinstance(
-                    probabilities,
-                    dict,
-                ):
-
-                    probabilities = {}
-
-                # =================================================
-                # SAVE AI SCAN
-                # =================================================
-
-                response = (
-                    sb
-                    .table("ai_scans")
-                    .insert(
-                        {
-                            "user_id":
-                                user.id,
-
-                            "patient_id":
-                                st.session_state.patient_id,
-
-                            "patient_name":
-                                patient_name,
-
-                            "patient_state":
-                                patient_state,
-
-                            "examination":
-                                examination,
-
-                            "model":
-                                model_name,
-
-                            "prediction":
-                                result.get(
-                                    "prediction"
-                                ),
-
-                            "confidence":
-                                float(
-                                    result.get(
-                                        "confidence",
-                                        0,
-                                    )
-                                ),
-
-                            "probabilities":
-                                probabilities,
-
-                            "image_path":
-                                image_path,
-
-                            "status":
-                                "AI_COMPLETED",
-                        }
-                    )
-                    .execute()
-                )
-
-                if not response.data:
-
-                    st.error(
-                        "The scan could not be saved."
-                    )
-
-                    return
-
-                # =================================================
-                # SESSION STATE
-                # =================================================
-
-                st.session_state.scan_id = (
-                    response.data[0]["id"]
-                )
-
-                st.session_state.scan_result = (
-                    result
-                )
-
-                st.session_state.review_status = (
-                    "NOT_REQUESTED"
-                )
-
-                st.session_state.review_id = None
-
-                st.success(
-                    "AI analysis completed."
-                )
-
-                st.rerun()
-
-            except Exception as error:
-
-                st.error(
-                    "The examination could "
-                    "not be analyzed."
-                )
-
-                with st.expander(
-                    "Technical details"
-                ):
-
-                    st.exception(error)
-
-                return
 
     # ========================================================
     # RESULT
@@ -1384,24 +981,20 @@ def show_detection():
         )
 
         # ----------------------------------------------------
-        # Brain V3.1
-        #
-        # IMPORTANT:
-        # Do not independently decide tumor presence from
-        # tumor_voxels > 0 here.
-        #
-        # The braintumor.py inference pipeline is responsible
-        # for applying the minimum tumor-size/false-positive
-        # filtering and returning the final prediction.
+        # BRAIN MRI
         # ----------------------------------------------------
 
         if brain_tumor:
 
+            brain_positive_classes = (
+                "GLIOMA",
+                "MENINGIOMA",
+                "PITUITARY",
+            )
+
             brain_positive = (
-                "TUMOR"
-                in prediction_upper
-                and "NO TUMOR"
-                not in prediction_upper
+                prediction_upper
+                in brain_positive_classes
             )
 
             if brain_positive:
@@ -1480,132 +1073,43 @@ def show_detection():
             )
 
     # ========================================================
-    # BRAIN TUMOR INFORMATION
+    # BRAIN MRI INFORMATION
     # ========================================================
 
     if brain_tumor:
 
         st.caption(
-            "MammoSense Brain V3.1 • "
-            "3D U-Net • 4-modality MRI"
+            "MammoSense Brain MRI • "
+            "2D ResNet-50 • 4-class classifier"
         )
 
-        brain_positive = (
-            "TUMOR"
-            in prediction_upper
-            and "NO TUMOR"
-            not in prediction_upper
+        brain_positive_classes = (
+            "GLIOMA",
+            "MENINGIOMA",
+            "PITUITARY",
         )
 
-        if brain_positive:
+        if prediction_upper in brain_positive_classes:
 
             st.warning(
-                "Tumor segmentation was identified "
-                "by the AI model. Radiologist review "
-                "is required."
+                f"AI classified the Brain MRI as "
+                f"{prediction}. "
+                "Radiologist review is required."
+            )
+
+        elif prediction_upper == "NOTUMOR":
+
+            st.success(
+                "AI classified this Brain MRI "
+                "as no tumor."
             )
 
         else:
 
-            st.success(
-                "No clinically significant tumor "
-                "segmentation was identified by "
-                "the AI screening model."
+            st.info(
+                "Brain MRI classification completed. "
+                "Radiologist review is required."
             )
-
-        # ----------------------------------------------------
-        # TUMOR PERCENTAGE
-        # ----------------------------------------------------
-
-        tumor_percentage = result.get(
-            "tumor_percentage"
-        )
-
-        if tumor_percentage is not None:
-
-            try:
-
-                tumor_percentage = float(
-                    tumor_percentage
-                )
-
-                st.metric(
-                    "Estimated Tumor Fraction",
-                    f"{tumor_percentage:.2f}%",
-                )
-
-            except Exception:
-
-                pass
-
-        # ----------------------------------------------------
-        # TUMOR VOXELS
-        # ----------------------------------------------------
-
-        tumor_volume = result.get(
-            "tumor_volume_voxels"
-        )
-
-        if tumor_volume is None:
-
-            tumor_volume = result.get(
-                "tumor_voxels"
-            )
-
-        if tumor_volume is not None:
-
-            try:
-
-                st.caption(
-                    "Segmented tumor voxels: "
-                    f"{int(tumor_volume):,}"
-                )
-
-            except Exception:
-
-                pass
-
-        # ----------------------------------------------------
-        # MAXIMUM PROBABILITY
-        # ----------------------------------------------------
-
-        maximum_probability = result.get(
-            "maximum_probability"
-        )
-
-        if maximum_probability is not None:
-
-            try:
-
-                st.caption(
-                    "Maximum voxel tumor probability: "
-                    f"{float(maximum_probability):.2%}"
-                )
-
-            except Exception:
-
-                pass
-
-        # ----------------------------------------------------
-        # MEAN PROBABILITY
-        # ----------------------------------------------------
-
-        mean_probability = result.get(
-            "mean_probability"
-        )
-
-        if mean_probability is not None:
-
-            try:
-
-                st.caption(
-                    "Mean voxel tumor probability: "
-                    f"{float(mean_probability):.2%}"
-                )
-
-            except Exception:
-
-                pass
 
     # ========================================================
     # PROBABILITIES
