@@ -7,15 +7,16 @@
 #   2. MammoSense Pneumonia
 #   3. MammoSense Tuberculosis
 #   4. MammoSense Brain MRI
+#   5. Medusa DR — Diabetic Retinopathy
 #
-# Brain MRI:
-#   2D ResNet-50 image classifier
+# Diabetic Retinopathy:
+#   EfficientNet-B3
+#   3-class classifier
 #
 # Classes:
-#   glioma
-#   meningioma
-#   pituitary
-#   notumor
+#   No DR
+#   Mild + Moderate NPDR
+#   Severe NPDR + PDR
 # ============================================================
 
 import io
@@ -411,6 +412,7 @@ def show_detection():
         "MammoSense Pneumonia — Chest X-ray",
         "MammoSense Tuberculosis — Chest X-ray",
         "MammoSense Brain — MRI",
+        "Medusa DR — Retinal Fundus",
     ]
 
     model_choice = st.selectbox(
@@ -443,6 +445,11 @@ def show_detection():
         == "MammoSense Brain — MRI"
     )
 
+    diabetic_retinopathy = (
+        model_choice
+        == "Medusa DR — Retinal Fundus"
+    )
+
     # ========================================================
     # EXAMINATION NAME
     # ========================================================
@@ -454,6 +461,10 @@ def show_detection():
     elif brain_tumor:
 
         examination = "Brain MRI"
+
+    elif diabetic_retinopathy:
+
+        examination = "Retinal Fundus"
 
     else:
 
@@ -479,6 +490,12 @@ def show_detection():
 
         model_name = (
             "MammoSense Brain MRI"
+        )
+
+    elif diabetic_retinopathy:
+
+        model_name = (
+            "Medusa DDR EfficientNet-B3 3-Class"
         )
 
     else:
@@ -566,9 +583,9 @@ def show_detection():
 
         return
 
-    # ====================================================
+    # ========================================================
     # AI ANALYSIS
-    # ====================================================
+    # ========================================================
 
     if st.button(
         "Analyze Examination",
@@ -664,6 +681,23 @@ def show_detection():
                         predict_brain(
                             image
                         )
+                    )
+
+                # ========================================
+                # DIABETIC RETINOPATHY
+                # ========================================
+
+                elif diabetic_retinopathy:
+
+                    from ai.diabetic_retinopathy import (
+                        load_model as load_dr_model,
+                        predict as predict_dr,
+                    )
+
+                    load_dr_model()
+
+                    result = predict_dr(
+                        image
                     )
 
                 # ========================================
@@ -1009,6 +1043,46 @@ def show_detection():
                     f"Finding: {prediction}"
                 )
 
+        # ----------------------------------------------------
+        # DIABETIC RETINOPATHY
+        # ----------------------------------------------------
+
+        elif diabetic_retinopathy:
+
+            if prediction_upper == "NO DR":
+
+                st.success(
+                    f"Finding: {prediction}"
+                )
+
+            elif prediction_upper in (
+                "MILD + MODERATE NPDR",
+                "MILD+MODERATE NPDR",
+            ):
+
+                st.warning(
+                    f"Finding: {prediction}"
+                )
+
+            elif prediction_upper in (
+                "SEVERE NPDR + PDR",
+                "SEVERE NPDR+PDR",
+            ):
+
+                st.error(
+                    f"Finding: {prediction}"
+                )
+
+            else:
+
+                st.info(
+                    f"Finding: {prediction}"
+                )
+
+        # ----------------------------------------------------
+        # OTHER MODELS
+        # ----------------------------------------------------
+
         else:
 
             positive_findings = (
@@ -1109,6 +1183,54 @@ def show_detection():
             st.info(
                 "Brain MRI classification completed. "
                 "Radiologist review is required."
+            )
+
+    # ========================================================
+    # DIABETIC RETINOPATHY INFORMATION
+    # ========================================================
+
+    if diabetic_retinopathy:
+
+        st.caption(
+            "Medusa DDR • EfficientNet-B3 • "
+            "3-class diabetic retinopathy classifier"
+        )
+
+        if prediction_upper == "NO DR":
+
+            st.success(
+                "AI classified this retinal fundus "
+                "image as No Diabetic Retinopathy."
+            )
+
+        elif prediction_upper in (
+            "MILD + MODERATE NPDR",
+            "MILD+MODERATE NPDR",
+        ):
+
+            st.warning(
+                "AI detected Mild/Moderate "
+                "Non-Proliferative Diabetic Retinopathy. "
+                "Ophthalmologist review is recommended."
+            )
+
+        elif prediction_upper in (
+            "SEVERE NPDR + PDR",
+            "SEVERE NPDR+PDR",
+        ):
+
+            st.error(
+                "AI detected Advanced Diabetic Retinopathy "
+                "(Severe NPDR/PDR). "
+                "Prompt ophthalmic evaluation is recommended."
+            )
+
+        else:
+
+            st.info(
+                "Diabetic retinopathy classification "
+                "completed. Professional evaluation "
+                "is recommended."
             )
 
     # ========================================================
