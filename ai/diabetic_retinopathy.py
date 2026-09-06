@@ -1,28 +1,21 @@
 # ============================================================
 # MEDUSA AI
-# DIABETIC RETINOPATHY MODEL
+# DIABETIC RETINOPATHY
 #
 # Model:
 #   EfficientNet-B3
+#
+# Hugging Face:
+#   Makky07/Retinopathy
 #
 # Classes:
 #   0 = No DR
 #   1 = Mild + Moderate NPDR
 #   2 = Severe NPDR + PDR
-#
-# Output:
-# {
-#     "prediction": "...",
-#     "confidence": 0.95,
-#     "probabilities": {
-#         "...": 0.95,
-#         "...": 0.04,
-#         "...": 0.01
-#     }
-# }
 # ============================================================
 
 from pathlib import Path
+import os
 
 import torch
 import torch.nn.functional as F
@@ -32,31 +25,38 @@ import timm
 
 
 # ============================================================
-# PATHS
+# CONFIGURATION
 # ============================================================
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+HF_MODEL_URL = (
+    "https://huggingface.co/"
+    "Makky07/Retinopathy/resolve/main/"
+    "MEDUSA_DDR_EfficientNetB3_3CLASS_5000_best.pt"
+)
 
-MODEL_DIR = (
-    BASE_DIR
-    / "models"
+HF_JSON_URL = (
+    "https://huggingface.co/"
+    "Makky07/Retinopathy/resolve/main/"
+    "MEDUSA_DDR_EfficientNetB3_3CLASS_5000%20%281%29.json"
+)
+
+# Streamlit server cache location
+CACHE_DIR = (
+    Path.home()
+    / ".cache"
+    / "medusa"
     / "diabetic_retinopathy"
 )
 
 MODEL_FILE = (
-    MODEL_DIR
+    CACHE_DIR
     / "MEDUSA_DDR_EfficientNetB3_3CLASS_5000_best.pt"
 )
 
 JSON_FILE = (
-    MODEL_DIR
+    CACHE_DIR
     / "MEDUSA_DDR_EfficientNetB3_3CLASS_5000.json"
 )
-
-
-# ============================================================
-# DEVICE
-# ============================================================
 
 DEVICE = torch.device(
     "cuda"
@@ -78,26 +78,16 @@ CLASS_NAMES = [
 
 # ============================================================
 # IMAGE TRANSFORM
-#
-# MUST MATCH TRAINING
 # ============================================================
 
 TRANSFORM = transforms.Compose([
-    transforms.Resize(
-        (300, 300)
-    ),
+    transforms.Resize((300, 300)),
+
     transforms.ToTensor(),
+
     transforms.Normalize(
-        mean=[
-            0.485,
-            0.456,
-            0.406,
-        ],
-        std=[
-            0.229,
-            0.224,
-            0.225,
-        ],
+        mean=[0.485, 0.456, 0.406],
+        std=[0.229, 0.224, 0.225],
     ),
 ])
 
@@ -110,6 +100,133 @@ _model = None
 
 
 # ============================================================
+# DOWNLOAD MODEL
+# ============================================================
+
+def _download_file(url, destination):
+
+    destination = Path(destination)
+
+    destination.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    # Already downloaded
+    if destination.exists():
+
+        # Make sure it isn't an empty/partial file
+        if destination.stat().st_size > 0:
+            return destination
+
+        destination.unlink()
+
+    try:
+
+        import requests
+
+    except ImportError as e:
+
+        raise ImportError(
+            "The requests package is required "
+            "to download the diabetic retinopathy model."
+        ) from e
+
+    print(
+        "Downloading Medusa DR model "
+        "from Hugging Face..."
+    )
+
+    response = requests.get(
+        url,
+        stream=True,
+        timeout=120,
+    )
+
+    response.raise_for_status()
+
+    total_size = int(
+        response.headers.get(
+            "content-length",
+            0,
+        )
+    )
+
+    downloaded = 0
+
+    with open(
+        destination,
+        "wb",
+    ) as file:
+
+        for chunk in response.iter_content(
+            chunk_size=1024 * 1024
+        ):
+
+            if not chunk:
+                continue
+
+            file.write(chunk)
+
+            downloaded += len(chunk)
+
+    # Verify something was actually downloaded
+    if not destination.exists():
+
+        raise RuntimeError(
+            "Model download failed: "
+            "file was not created."
+        )
+
+    if destination.stat().st_size == 0:
+
+        destination.unlink()
+
+        raise RuntimeError(
+            "Model download failed: "
+            "downloaded file is empty."
+        )
+
+    # Optional size sanity check
+    if total_size > 0:
+
+        actual_size = destination.stat().st_size
+
+        if actual_size != total_size:
+
+            destination.unlink()
+
+            raise RuntimeError(
+                "Incomplete model download.\n"
+                f"Expected: {total_size:,} bytes\n"
+                f"Received: {actual_size:,} bytes"
+            )
+
+    print(
+        "Medusa DR model downloaded successfully."
+    )
+
+    return destination
+
+
+# ============================================================
+# ENSURE MODEL EXISTS
+# ============================================================
+
+def _ensure_model():
+
+    if MODEL_FILE.exists():
+
+        if MODEL_FILE.stat().st_size > 0:
+            return MODEL_FILE
+
+    return _download_file(
+        HF_MODEL_URL,
+        MODEL_FILE,
+    )
+
+
+# ============================================================
 # LOAD MODEL
 # ============================================================
 
@@ -117,24 +234,14 @@ def load_model():
 
     global _model
 
-    # --------------------------------------------------------
-    # Already loaded
-    # --------------------------------------------------------
-
     if _model is not None:
-
         return _model
 
     # --------------------------------------------------------
-    # Check model
+    # Download model if necessary
     # --------------------------------------------------------
 
-    if not MODEL_FILE.exists():
-
-        raise FileNotFoundError(
-            "Diabetic retinopathy model "
-            f"not found:\n{MODEL_FILE}"
-        )
+    model_path = _ensure_model()
 
     # --------------------------------------------------------
     # Create EfficientNet-B3
@@ -151,7 +258,7 @@ def load_model():
     # --------------------------------------------------------
 
     checkpoint = torch.load(
-        MODEL_FILE,
+        model_path,
         map_location="cpu",
     )
 
@@ -159,28 +266,21 @@ def load_model():
     # Handle different checkpoint formats
     # --------------------------------------------------------
 
-    if isinstance(
-        checkpoint,
-        dict,
-    ):
+    if isinstance(checkpoint, dict):
 
         if "state_dict" in checkpoint:
 
-            state_dict = (
-                checkpoint["state_dict"]
-            )
+            state_dict = checkpoint["state_dict"]
 
         elif "model_state_dict" in checkpoint:
 
-            state_dict = (
-                checkpoint["model_state_dict"]
-            )
+            state_dict = checkpoint[
+                "model_state_dict"
+            ]
 
         elif "model" in checkpoint:
 
-            state_dict = (
-                checkpoint["model"]
-            )
+            state_dict = checkpoint["model"]
 
         else:
 
@@ -200,25 +300,17 @@ def load_model():
 
         new_key = key
 
-        if new_key.startswith(
-            "module."
-        ):
-
+        if new_key.startswith("module."):
             new_key = new_key[
                 len("module.") :
             ]
 
-        if new_key.startswith(
-            "model."
-        ):
-
+        if new_key.startswith("model."):
             new_key = new_key[
                 len("model.") :
             ]
 
-        cleaned_state_dict[
-            new_key
-        ] = value
+        cleaned_state_dict[new_key] = value
 
     # --------------------------------------------------------
     # Load weights
@@ -233,9 +325,7 @@ def load_model():
     # Device
     # --------------------------------------------------------
 
-    model = model.to(
-        DEVICE
-    )
+    model = model.to(DEVICE)
 
     model.eval()
 
@@ -250,24 +340,16 @@ def load_model():
 
 def predict(image):
 
-    # --------------------------------------------------------
-    # Validate image
-    # --------------------------------------------------------
-
     if image is None:
 
         raise ValueError(
             "No retinal fundus image was provided."
         )
 
-    # --------------------------------------------------------
-    # Load model
-    # --------------------------------------------------------
-
     model = load_model()
 
     # --------------------------------------------------------
-    # Convert to RGB
+    # Convert image
     # --------------------------------------------------------
 
     if not isinstance(
@@ -275,27 +357,19 @@ def predict(image):
         Image.Image,
     ):
 
-        image = Image.open(
-            image
-        )
+        image = Image.open(image)
 
-    image = image.convert(
-        "RGB"
-    )
+    image = image.convert("RGB")
 
     # --------------------------------------------------------
     # Transform
     # --------------------------------------------------------
 
-    tensor = TRANSFORM(
-        image
-    )
+    tensor = TRANSFORM(image)
 
-    tensor = tensor.unsqueeze(
-        0
-    ).to(
-        DEVICE
-    )
+    tensor = tensor.unsqueeze(0)
+
+    tensor = tensor.to(DEVICE)
 
     # --------------------------------------------------------
     # Inference
@@ -309,35 +383,31 @@ def predict(image):
                 device_type="cuda"
             ):
 
-                outputs = model(
-                    tensor
-                )
+                outputs = model(tensor)
 
         else:
 
-            outputs = model(
-                tensor
-            )
-
-        probabilities = F.softmax(
-            outputs,
-            dim=1,
-        )
+            outputs = model(tensor)
 
     # --------------------------------------------------------
-    # Prediction
+    # Probabilities
     # --------------------------------------------------------
+
+    probabilities = F.softmax(
+        outputs,
+        dim=1,
+    )
 
     predicted_class = (
-        probabilities.argmax(
-            dim=1
-        ).item()
+        probabilities
+        .argmax(dim=1)
+        .item()
     )
 
     confidence = (
         probabilities[
             0,
-            predicted_class
+            predicted_class,
         ].item()
     )
 
@@ -351,12 +421,10 @@ def predict(image):
         CLASS_NAMES
     ):
 
-        probability_dict[
-            class_name
-        ] = round(
+        probability_dict[class_name] = round(
             probabilities[
                 0,
-                index
+                index,
             ].item(),
             6,
         )
@@ -366,40 +434,44 @@ def predict(image):
     # --------------------------------------------------------
 
     return {
+
         "prediction":
-            CLASS_NAMES[
-                predicted_class
-            ],
+            CLASS_NAMES[predicted_class],
 
         "confidence":
-            float(
-                confidence
-            ),
+            float(confidence),
 
         "probabilities":
             probability_dict,
+
     }
 
 
 # ============================================================
-# OPTIONAL MODEL INFORMATION
+# MODEL INFORMATION
 # ============================================================
 
 def model_info():
 
     return {
+
         "model":
             "EfficientNet-B3",
 
+        "architecture":
+            "tf_efficientnet_b3",
+
+        "source":
+            "Hugging Face",
+
+        "repository":
+            "Makky07/Retinopathy",
+
         "model_file":
-            str(
-                MODEL_FILE
-            ),
+            str(MODEL_FILE),
 
         "metadata_file":
-            str(
-                JSON_FILE
-            ),
+            str(JSON_FILE),
 
         "num_classes":
             3,
@@ -411,7 +483,6 @@ def model_info():
             [300, 300],
 
         "device":
-            str(
-                DEVICE
-            ),
+            str(DEVICE),
+
     }
