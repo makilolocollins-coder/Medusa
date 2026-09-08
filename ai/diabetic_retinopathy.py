@@ -6,7 +6,7 @@
 #
 # Stage 1:
 #   No DR vs Any DR
-#   Architecture: timm EfficientNet-B3
+#   Architecture: torchvision EfficientNet-B3
 #
 # Stage 2:
 #   Mild + Moderate vs Severe + PDR
@@ -21,17 +21,18 @@
 #   2 = Severe NPDR + PDR
 # ============================================================
 
+
 from pathlib import Path
 import json
+import shutil
 
 import torch
 import torch.nn.functional as F
 
 from PIL import Image
+
 from torchvision import transforms
 from torchvision.models import efficientnet_b3
-
-import timm
 
 
 # ============================================================
@@ -40,18 +41,16 @@ import timm
 
 HF_REPO = "Makky07/Retinopathy"
 
-STAGE1_FILENAME = (
-    "MEDUSA_DR_STAGE1_NoDR_vs_DR_best.pt"
-)
 
-STAGE2_FILENAME = (
-    "MEDUSA_DR_STAGE2_V2_MildModerate_vs_"
-    "SeverePDR_best.pt"
-)
+# ------------------------------------------------------------
+# NEW MEDUSA MODEL FILES
+# ------------------------------------------------------------
 
-THRESHOLD_FILENAME = (
-    "MEDUSA_DR_STAGE2_V2_threshold.json"
-)
+STAGE1_FILENAME = "medusa_stage1.pt"
+STAGE1_JSON_FILENAME = "medusa_stage1.json"
+
+STAGE2_FILENAME = "medusa_stage2.pt"
+STAGE2_JSON_FILENAME = "medusa_stage2.json"
 
 
 # ============================================================
@@ -65,19 +64,26 @@ CACHE_DIR = (
     / "diabetic_retinopathy"
 )
 
+
 STAGE1_FILE = (
     CACHE_DIR
     / STAGE1_FILENAME
 )
+
+STAGE1_JSON_FILE = (
+    CACHE_DIR
+    / STAGE1_JSON_FILENAME
+)
+
 
 STAGE2_FILE = (
     CACHE_DIR
     / STAGE2_FILENAME
 )
 
-THRESHOLD_FILE = (
+STAGE2_JSON_FILE = (
     CACHE_DIR
-    / THRESHOLD_FILENAME
+    / STAGE2_JSON_FILENAME
 )
 
 
@@ -104,27 +110,54 @@ CLASS_NAMES = [
 
 
 # ============================================================
-# STAGE-SPECIFIC IMAGE TRANSFORMS
+# NORMALIZATION
 # ============================================================
 
 NORMALIZE = transforms.Normalize(
-    mean=[0.485, 0.456, 0.406],
-    std=[0.229, 0.224, 0.225],
+    mean=[
+        0.485,
+        0.456,
+        0.406,
+    ],
+    std=[
+        0.229,
+        0.224,
+        0.225,
+    ],
 )
 
 
-# Stage 1 was trained at 300 × 300
+# ============================================================
+# IMAGE TRANSFORMS
+# ============================================================
+#
+# IMPORTANT:
+#
+# The new training code uses 300 × 300 for BOTH stages.
+#
+# Therefore Stage 2 is no longer 380 × 380.
+# ============================================================
+
 STAGE1_TRANSFORM = transforms.Compose([
-    transforms.Resize((300, 300)),
+
+    transforms.Resize(
+        (300, 300)
+    ),
+
     transforms.ToTensor(),
+
     NORMALIZE,
 ])
 
 
-# Stage 2 V2 was trained at 380 × 380
 STAGE2_TRANSFORM = transforms.Compose([
-    transforms.Resize((380, 380)),
+
+    transforms.Resize(
+        (300, 300)
+    ),
+
     transforms.ToTensor(),
+
     NORMALIZE,
 ])
 
@@ -134,8 +167,10 @@ STAGE2_TRANSFORM = transforms.Compose([
 # ============================================================
 
 _stage1_model = None
+
 _stage2_model = None
-_stage2_threshold = 0.590
+
+_stage2_threshold = 0.50
 
 
 # ============================================================
@@ -147,18 +182,21 @@ def _download_file(
     destination,
 ):
     """
-    Download a file from Hugging Face.
+    Download a MEDUSA model file from Hugging Face.
     """
 
-    destination = Path(destination)
+    destination = Path(
+        destination
+    )
 
     destination.parent.mkdir(
         parents=True,
         exist_ok=True,
     )
 
+
     # --------------------------------------------------------
-    # Already downloaded
+    # Already cached
     # --------------------------------------------------------
 
     if destination.exists():
@@ -169,44 +207,67 @@ def _download_file(
 
         destination.unlink()
 
+
+    # --------------------------------------------------------
+    # Import Hugging Face Hub
+    # --------------------------------------------------------
+
     try:
 
-        from huggingface_hub import hf_hub_download
+        from huggingface_hub import (
+            hf_hub_download
+        )
 
     except ImportError as e:
 
         raise ImportError(
-            "huggingface_hub is required for "
-            "the MEDUSA diabetic retinopathy model."
+            "huggingface_hub is required "
+            "for MEDUSA diabetic retinopathy."
         ) from e
 
+
     print(
-        f"Downloading MEDUSA DR file: {filename}"
+        f"Downloading MEDUSA DR file: "
+        f"{filename}"
     )
 
+
+    # --------------------------------------------------------
+    # Download
+    # --------------------------------------------------------
+
     downloaded_path = hf_hub_download(
+
         repo_id=HF_REPO,
+
         filename=filename,
     )
 
+
+    downloaded_path = Path(
+        downloaded_path
+    )
+
+
     # --------------------------------------------------------
-    # Copy into MEDUSA cache
+    # Copy to MEDUSA cache
     # --------------------------------------------------------
 
-    downloaded_path = Path(downloaded_path)
-
-    if downloaded_path.resolve() != destination.resolve():
-
-        import shutil
+    if (
+        downloaded_path.resolve()
+        != destination.resolve()
+    ):
 
         shutil.copy2(
             downloaded_path,
             destination,
         )
 
+
     print(
-        f"Downloaded successfully: {filename}"
+        f"✓ Downloaded: {filename}"
     )
+
 
     return destination
 
@@ -217,72 +278,167 @@ def _download_file(
 
 def _ensure_files():
 
+    # Stage 1 model
     _download_file(
         STAGE1_FILENAME,
         STAGE1_FILE,
     )
 
+
+    # Stage 1 metadata
+    _download_file(
+        STAGE1_JSON_FILENAME,
+        STAGE1_JSON_FILE,
+    )
+
+
+    # Stage 2 model
     _download_file(
         STAGE2_FILENAME,
         STAGE2_FILE,
     )
 
+
+    # Stage 2 metadata
     _download_file(
-        THRESHOLD_FILENAME,
-        THRESHOLD_FILE,
+        STAGE2_JSON_FILENAME,
+        STAGE2_JSON_FILE,
     )
 
 
 # ============================================================
-# LOAD THRESHOLD
+# LOAD JSON METADATA
+# ============================================================
+
+def _load_json(
+    filepath
+):
+
+    filepath = Path(
+        filepath
+    )
+
+
+    if not filepath.exists():
+
+        return {}
+
+
+    try:
+
+        with open(
+            filepath,
+            "r",
+            encoding="utf-8",
+        ) as file:
+
+            return json.load(file)
+
+
+    except Exception as e:
+
+        print(
+            f"Warning: Could not read "
+            f"{filepath.name}: {e}"
+        )
+
+        return {}
+
+
+# ============================================================
+# LOAD STAGE 2 THRESHOLD
 # ============================================================
 
 def _load_threshold():
 
     global _stage2_threshold
 
-    _stage2_threshold = 0.590
 
-    if not THRESHOLD_FILE.exists():
+    # --------------------------------------------------------
+    # Safe default
+    # --------------------------------------------------------
 
-        return
+    _stage2_threshold = 0.50
 
-    try:
 
-        with open(
-            THRESHOLD_FILE,
-            "r",
-            encoding="utf-8",
-        ) as file:
+    metadata = _load_json(
+        STAGE2_JSON_FILE
+    )
 
-            data = json.load(file)
 
-        # ----------------------------------------------------
-        # Expected:
-        # {"threshold": 0.59, ...}
-        # ----------------------------------------------------
+    # --------------------------------------------------------
+    # New training JSON
+    # --------------------------------------------------------
 
-        if "threshold" in data:
+    if (
+        "selected_threshold"
+        in metadata
+    ):
+
+        try:
 
             _stage2_threshold = float(
-                data["threshold"]
+                metadata[
+                    "selected_threshold"
+                ]
             )
 
-    except Exception as e:
+            return
 
-        print(
-            "Warning: Could not read Stage 2 "
-            f"threshold JSON: {e}"
-        )
+        except Exception:
 
-        _stage2_threshold = 0.590
+            pass
+
+
+    # --------------------------------------------------------
+    # Fallback if older metadata format
+    # --------------------------------------------------------
+
+    if (
+        "threshold"
+        in metadata
+    ):
+
+        try:
+
+            _stage2_threshold = float(
+                metadata[
+                    "threshold"
+                ]
+            )
+
+            return
+
+        except Exception:
+
+            pass
+
+
+    # --------------------------------------------------------
+    # Final fallback
+    # --------------------------------------------------------
+
+    print(
+        "Warning: Stage 2 threshold was "
+        "not found in JSON."
+    )
+
+    print(
+        "Using default threshold: 0.500"
+    )
 
 
 # ============================================================
 # CHECKPOINT STATE DICT
 # ============================================================
 
-def _get_state_dict(checkpoint):
+def _get_state_dict(
+    checkpoint
+):
+
+    # --------------------------------------------------------
+    # Checkpoint must be dictionary
+    # --------------------------------------------------------
 
     if not isinstance(
         checkpoint,
@@ -290,22 +446,46 @@ def _get_state_dict(checkpoint):
     ):
 
         raise RuntimeError(
-            "Invalid MEDUSA DR checkpoint format."
+            "Invalid MEDUSA checkpoint format."
         )
 
-    if "model_state_dict" in checkpoint:
+
+    # --------------------------------------------------------
+    # New checkpoints
+    #
+    # The new training code saves:
+    #
+    # torch.save(clean_state, output_pt)
+    #
+    # Therefore the checkpoint itself is the state dict.
+    # --------------------------------------------------------
+
+    if (
+        "model_state_dict"
+        in checkpoint
+    ):
 
         state_dict = checkpoint[
             "model_state_dict"
         ]
 
-    elif "state_dict" in checkpoint:
+    elif (
+        "state_dict"
+        in checkpoint
+    ):
 
         state_dict = checkpoint[
             "state_dict"
         ]
 
-    elif "model" in checkpoint:
+    elif (
+        "model"
+        in checkpoint
+        and isinstance(
+            checkpoint["model"],
+            dict,
+        )
+    ):
 
         state_dict = checkpoint[
             "model"
@@ -315,29 +495,41 @@ def _get_state_dict(checkpoint):
 
         state_dict = checkpoint
 
+
     # --------------------------------------------------------
     # Remove common prefixes
     # --------------------------------------------------------
 
     cleaned = {}
 
+
     for key, value in state_dict.items():
 
         new_key = key
 
-        if new_key.startswith("module."):
+
+        if new_key.startswith(
+            "module."
+        ):
 
             new_key = new_key[
                 len("module.") :
             ]
 
-        if new_key.startswith("model."):
+
+        if new_key.startswith(
+            "model."
+        ):
 
             new_key = new_key[
                 len("model.") :
             ]
 
-        cleaned[new_key] = value
+
+        cleaned[
+            new_key
+        ] = value
+
 
     return cleaned
 
@@ -348,35 +540,91 @@ def _get_state_dict(checkpoint):
 
 def _load_stage1():
 
-    checkpoint = torch.load(
-        STAGE1_FILE,
-        map_location="cpu",
-        weights_only=False,
+    print(
+        "Loading Stage 1 "
+        "(torchvision EfficientNet-B3)..."
     )
+
+
+    checkpoint = torch.load(
+
+        STAGE1_FILE,
+
+        map_location="cpu",
+
+        weights_only=True,
+    )
+
 
     state_dict = _get_state_dict(
         checkpoint
     )
 
+
     # --------------------------------------------------------
-    # IMPORTANT:
-    # Stage 1 was trained with TIMM
+    # NEW MODEL
+    #
+    # Training:
+    #
+    # efficientnet_b3(
+    #     weights=DEFAULT
+    # )
+    #
+    # classifier -> Linear(..., 2)
     # --------------------------------------------------------
 
-    model = timm.create_model(
-        "efficientnet_b3",
-        pretrained=False,
+    model = efficientnet_b3(
+
+        weights=None,
+
         num_classes=2,
     )
 
-    model.load_state_dict(
-        state_dict,
-        strict=True,
+
+    # --------------------------------------------------------
+    # Load weights
+    # --------------------------------------------------------
+
+    missing, unexpected = (
+        model.load_state_dict(
+            state_dict,
+            strict=False,
+        )
     )
 
-    model = model.to(DEVICE)
+
+    if missing:
+
+        raise RuntimeError(
+            "Stage 1 checkpoint is missing "
+            f"model parameters:\n{missing}"
+        )
+
+
+    if unexpected:
+
+        print(
+            "Warning: unexpected Stage 1 "
+            f"parameters: {unexpected}"
+        )
+
+
+    # --------------------------------------------------------
+    # Device
+    # --------------------------------------------------------
+
+    model = model.to(
+        DEVICE
+    )
+
 
     model.eval()
+
+
+    print(
+        "✓ Stage 1 loaded"
+    )
+
 
     return model
 
@@ -387,34 +635,83 @@ def _load_stage1():
 
 def _load_stage2():
 
-    checkpoint = torch.load(
-        STAGE2_FILE,
-        map_location="cpu",
-        weights_only=False,
+    print(
+        "Loading Stage 2 "
+        "(torchvision EfficientNet-B3)..."
     )
+
+
+    checkpoint = torch.load(
+
+        STAGE2_FILE,
+
+        map_location="cpu",
+
+        weights_only=True,
+    )
+
 
     state_dict = _get_state_dict(
         checkpoint
     )
 
+
     # --------------------------------------------------------
-    # IMPORTANT:
-    # Stage 2 was trained with TORCHVISION
+    # NEW MODEL
     # --------------------------------------------------------
 
     model = efficientnet_b3(
+
         weights=None,
+
         num_classes=2,
     )
 
-    model.load_state_dict(
-        state_dict,
-        strict=True,
+
+    # --------------------------------------------------------
+    # Load weights
+    # --------------------------------------------------------
+
+    missing, unexpected = (
+        model.load_state_dict(
+            state_dict,
+            strict=False,
+        )
     )
 
-    model = model.to(DEVICE)
+
+    if missing:
+
+        raise RuntimeError(
+            "Stage 2 checkpoint is missing "
+            f"model parameters:\n{missing}"
+        )
+
+
+    if unexpected:
+
+        print(
+            "Warning: unexpected Stage 2 "
+            f"parameters: {unexpected}"
+        )
+
+
+    # --------------------------------------------------------
+    # Device
+    # --------------------------------------------------------
+
+    model = model.to(
+        DEVICE
+    )
+
 
     model.eval()
+
+
+    print(
+        "✓ Stage 2 loaded"
+    )
+
 
     return model
 
@@ -428,80 +725,84 @@ def load_model():
     global _stage1_model
     global _stage2_model
 
+
     # --------------------------------------------------------
     # Already loaded
     # --------------------------------------------------------
 
     if (
         _stage1_model is not None
-        and _stage2_model is not None
+        and
+        _stage2_model is not None
     ):
 
         return {
-            "stage1": _stage1_model,
-            "stage2": _stage2_model,
+
+            "stage1":
+                _stage1_model,
+
+            "stage2":
+                _stage2_model,
         }
+
 
     print(
         "Loading MEDUSA hierarchical "
         "diabetic retinopathy models..."
     )
 
+
     # --------------------------------------------------------
-    # Download files
+    # Download
     # --------------------------------------------------------
 
     _ensure_files()
 
+
     # --------------------------------------------------------
-    # Threshold
+    # Load threshold
     # --------------------------------------------------------
 
     _load_threshold()
+
 
     print(
         f"Stage 2 threshold: "
         f"{_stage2_threshold:.3f}"
     )
 
+
     # --------------------------------------------------------
     # Stage 1
     # --------------------------------------------------------
 
-    print(
-        "Loading Stage 1 "
-        "(timm EfficientNet-B3)..."
+    _stage1_model = (
+        _load_stage1()
     )
 
-    _stage1_model = _load_stage1()
-
-    print(
-        "✓ Stage 1 loaded"
-    )
 
     # --------------------------------------------------------
     # Stage 2
     # --------------------------------------------------------
 
-    print(
-        "Loading Stage 2 "
-        "(torchvision EfficientNet-B3)..."
+    _stage2_model = (
+        _load_stage2()
     )
 
-    _stage2_model = _load_stage2()
 
     print(
-        "✓ Stage 2 loaded"
+        "✓ MEDUSA hierarchical DR "
+        "model loaded successfully."
     )
 
-    print(
-        "✓ MEDUSA hierarchical DR model "
-        "loaded successfully."
-    )
 
     return {
-        "stage1": _stage1_model,
-        "stage2": _stage2_model,
+
+        "stage1":
+            _stage1_model,
+
+        "stage2":
+            _stage2_model,
     }
 
 
@@ -509,54 +810,87 @@ def load_model():
 # PREDICT
 # ============================================================
 
-def predict(image):
+def predict(
+    image
+):
 
     if image is None:
 
         raise ValueError(
-            "No retinal fundus image was provided."
+            "No retinal fundus image "
+            "was provided."
         )
+
+
+    # --------------------------------------------------------
+    # Load models
+    # --------------------------------------------------------
 
     models = load_model()
 
-    stage1_model = models["stage1"]
-    stage2_model = models["stage2"]
 
-    # --------------------------------------------------------
-    # Convert image
-    # --------------------------------------------------------
+    stage1_model = (
+        models["stage1"]
+    )
+
+    stage2_model = (
+        models["stage2"]
+    )
+
+
+    # ========================================================
+    # CONVERT IMAGE
+    # ========================================================
 
     if not isinstance(
         image,
         Image.Image,
     ):
 
-        image = Image.open(image)
+        image = Image.open(
+            image
+        )
 
-    image = image.convert("RGB")
+
+    image = image.convert(
+        "RGB"
+    )
+
 
     # ========================================================
     # STAGE 1
     # ========================================================
 
-    stage1_tensor = STAGE1_TRANSFORM(
-        image
+    stage1_tensor = (
+        STAGE1_TRANSFORM(
+            image
+        )
     )
 
-    stage1_tensor = stage1_tensor.unsqueeze(
-        0
+
+    stage1_tensor = (
+        stage1_tensor.unsqueeze(0)
     )
 
-    stage1_tensor = stage1_tensor.to(
-        DEVICE
+
+    stage1_tensor = (
+        stage1_tensor.to(
+            DEVICE
+        )
     )
+
+
+    # --------------------------------------------------------
+    # Stage 1 inference
+    # --------------------------------------------------------
 
     with torch.no_grad():
 
         if DEVICE.type == "cuda":
 
             with torch.amp.autocast(
-                device_type="cuda"
+                device_type="cuda",
+                dtype=torch.float16,
             ):
 
                 stage1_outputs = (
@@ -567,28 +901,52 @@ def predict(image):
 
         else:
 
-            stage1_outputs = stage1_model(
-                stage1_tensor
+            stage1_outputs = (
+                stage1_model(
+                    stage1_tensor
+                )
             )
 
-    stage1_probabilities = F.softmax(
-        stage1_outputs,
-        dim=1,
+
+    stage1_probabilities = (
+        F.softmax(
+            stage1_outputs,
+            dim=1,
+        )
     )
+
+
+    # --------------------------------------------------------
+    # Stage 1 probabilities
+    #
+    # 0 = No DR
+    # 1 = Any DR
+    # --------------------------------------------------------
 
     stage1_no_dr_probability = float(
-        stage1_probabilities[0, 0].item()
+        stage1_probabilities[
+            0,
+            0
+        ].item()
     )
+
 
     stage1_dr_probability = float(
-        stage1_probabilities[0, 1].item()
+        stage1_probabilities[
+            0,
+            1
+        ].item()
     )
 
+
     stage1_prediction = int(
-        stage1_probabilities.argmax(
+        stage1_probabilities
+        .argmax(
             dim=1
-        ).item()
+        )
+        .item()
     )
+
 
     # ========================================================
     # STAGE 1 → NO DR
@@ -598,17 +956,25 @@ def predict(image):
 
         final_class = 0
 
+
         final_confidence = (
             stage1_no_dr_probability
         )
 
+
         return {
 
             "prediction":
-                CLASS_NAMES[final_class],
+                CLASS_NAMES[
+                    final_class
+                ],
+
 
             "confidence":
-                float(final_confidence),
+                float(
+                    final_confidence
+                ),
+
 
             "probabilities": {
 
@@ -625,8 +991,14 @@ def predict(image):
                     0.0,
             },
 
+
+            # ------------------------------------------------
+            # Stage 1
+            # ------------------------------------------------
+
             "stage1_prediction":
                 "No DR",
+
 
             "stage1_confidence":
                 round(
@@ -634,11 +1006,13 @@ def predict(image):
                     6,
                 ),
 
+
             "stage1_no_dr_probability":
                 round(
                     stage1_no_dr_probability,
                     6,
                 ),
+
 
             "stage1_dr_probability":
                 round(
@@ -646,34 +1020,60 @@ def predict(image):
                     6,
                 ),
 
+
+            # ------------------------------------------------
+            # Stage 2
+            # ------------------------------------------------
+
             "stage2_prediction":
                 None,
+
+
+            "stage2_mild_moderate_probability":
+                None,
+
+
+            "stage2_severe_probability":
+                None,
+
 
             "stage2_threshold":
                 float(
                     _stage2_threshold
                 ),
 
+
+            # ------------------------------------------------
+            # Metadata
+            # ------------------------------------------------
+
             "screening":
                 True,
         }
+
 
     # ========================================================
     # STAGE 1 → ANY DR
     # ========================================================
 
-    # Stage 2 uses 380 × 380
-    stage2_tensor = STAGE2_TRANSFORM(
-        image
+    stage2_tensor = (
+        STAGE2_TRANSFORM(
+            image
+        )
     )
 
-    stage2_tensor = stage2_tensor.unsqueeze(
-        0
+
+    stage2_tensor = (
+        stage2_tensor.unsqueeze(0)
     )
 
-    stage2_tensor = stage2_tensor.to(
-        DEVICE
+
+    stage2_tensor = (
+        stage2_tensor.to(
+            DEVICE
+        )
     )
+
 
     # ========================================================
     # STAGE 2
@@ -684,7 +1084,8 @@ def predict(image):
         if DEVICE.type == "cuda":
 
             with torch.amp.autocast(
-                device_type="cuda"
+                device_type="cuda",
+                dtype=torch.float16,
             ):
 
                 stage2_outputs = (
@@ -695,25 +1096,46 @@ def predict(image):
 
         else:
 
-            stage2_outputs = stage2_model(
-                stage2_tensor
+            stage2_outputs = (
+                stage2_model(
+                    stage2_tensor
+                )
             )
 
-    stage2_probabilities = F.softmax(
-        stage2_outputs,
-        dim=1,
+
+    stage2_probabilities = (
+        F.softmax(
+            stage2_outputs,
+            dim=1,
+        )
     )
+
+
+    # --------------------------------------------------------
+    # Stage 2 probabilities
+    #
+    # 0 = Mild/Moderate
+    # 1 = Severe/PDR
+    # --------------------------------------------------------
 
     mild_moderate_probability = float(
-        stage2_probabilities[0, 0].item()
+        stage2_probabilities[
+            0,
+            0
+        ].item()
     )
+
 
     severe_probability = float(
-        stage2_probabilities[0, 1].item()
+        stage2_probabilities[
+            0,
+            1
+        ].item()
     )
 
+
     # ========================================================
-    # LOCKED THRESHOLD
+    # STAGE 2 THRESHOLD
     # ========================================================
 
     if (
@@ -743,52 +1165,54 @@ def predict(image):
             "Mild/Moderate"
         )
 
-    # ========================================================
-    # FINAL PROBABILITY DICTIONARY
-    # ========================================================
-
-    probability_dict = {
-
-        "No DR":
-            round(
-                stage1_no_dr_probability,
-                6,
-            ),
-
-        "Mild + Moderate NPDR":
-            round(
-                mild_moderate_probability,
-                6,
-            ),
-
-        "Severe NPDR + PDR":
-            round(
-                severe_probability,
-                6,
-            ),
-    }
 
     # ========================================================
-    # RESULT
+    # FINAL RESULT
     # ========================================================
 
     return {
 
         "prediction":
-            CLASS_NAMES[final_class],
+            CLASS_NAMES[
+                final_class
+            ],
+
 
         "confidence":
-            float(final_confidence),
+            float(
+                final_confidence
+            ),
 
-        "probabilities":
-            probability_dict,
 
-        # ----------------------------------------------------
-        # Stage 1 information
-        # ----------------------------------------------------
+        "probabilities": {
+
+            "No DR":
+                round(
+                    stage1_no_dr_probability,
+                    6,
+                ),
+
+            "Mild + Moderate NPDR":
+                round(
+                    mild_moderate_probability,
+                    6,
+                ),
+
+            "Severe NPDR + PDR":
+                round(
+                    severe_probability,
+                    6,
+                ),
+        },
+
+
+        # ====================================================
+        # STAGE 1
+        # ====================================================
 
         "stage1_prediction":
             "Any DR",
+
 
         "stage1_confidence":
             round(
@@ -796,11 +1220,13 @@ def predict(image):
                 6,
             ),
 
+
         "stage1_no_dr_probability":
             round(
                 stage1_no_dr_probability,
                 6,
             ),
+
 
         "stage1_dr_probability":
             round(
@@ -808,12 +1234,14 @@ def predict(image):
                 6,
             ),
 
-        # ----------------------------------------------------
-        # Stage 2 information
-        # ----------------------------------------------------
+
+        # ====================================================
+        # STAGE 2
+        # ====================================================
 
         "stage2_prediction":
             stage2_prediction,
+
 
         "stage2_mild_moderate_probability":
             round(
@@ -821,20 +1249,23 @@ def predict(image):
                 6,
             ),
 
+
         "stage2_severe_probability":
             round(
                 severe_probability,
                 6,
             ),
 
+
         "stage2_threshold":
             float(
                 _stage2_threshold
             ),
 
-        # ----------------------------------------------------
-        # Metadata
-        # ----------------------------------------------------
+
+        # ====================================================
+        # METADATA
+        # ====================================================
 
         "screening":
             True,
@@ -850,51 +1281,96 @@ def model_info():
     return {
 
         "model":
-            "Hierarchical EfficientNet-B3",
+            "MEDUSA Hierarchical EfficientNet-B3",
+
 
         "architecture":
             "2-stage EfficientNet-B3",
 
+
         "stage1_architecture":
-            "timm efficientnet_b3",
+            "torchvision EfficientNet-B3",
+
 
         "stage2_architecture":
-            "torchvision efficientnet_b3",
+            "torchvision EfficientNet-B3",
+
 
         "source":
             "Hugging Face",
 
+
         "repository":
             HF_REPO,
+
+
+        # ----------------------------------------------------
+        # Files
+        # ----------------------------------------------------
 
         "stage1_model_file":
             STAGE1_FILENAME,
 
+
+        "stage1_metadata_file":
+            STAGE1_JSON_FILENAME,
+
+
         "stage2_model_file":
             STAGE2_FILENAME,
 
-        "threshold_file":
-            THRESHOLD_FILENAME,
+
+        "stage2_metadata_file":
+            STAGE2_JSON_FILENAME,
+
+
+        # ----------------------------------------------------
+        # Classes
+        # ----------------------------------------------------
 
         "num_classes":
             3,
 
+
         "classes":
             CLASS_NAMES,
+
+
+        # ----------------------------------------------------
+        # Input
+        # ----------------------------------------------------
 
         "stage1_input_size":
             [300, 300],
 
+
         "stage2_input_size":
-            [380, 380],
+            [300, 300],
+
+
+        # ----------------------------------------------------
+        # Stage 2 threshold
+        # ----------------------------------------------------
 
         "stage2_threshold":
             float(
                 _stage2_threshold
             ),
 
+
+        # ----------------------------------------------------
+        # Device
+        # ----------------------------------------------------
+
         "device":
-            str(DEVICE),
+            str(
+                DEVICE
+            ),
+
+
+        # ----------------------------------------------------
+        # Type
+        # ----------------------------------------------------
 
         "type":
             "screening / decision support",
